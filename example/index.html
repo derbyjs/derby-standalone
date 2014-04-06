@@ -1,45 +1,72 @@
 <!DOCTYPE html>
 <meta charset="utf8">
+<style>
+  .tabs {
+    list-style: none;
+    padding: 0;
+  }
+  .tabs > li {
+    display: inline-block;
+    padding: 10px;
+    border: 0 solid black;
+    border-width: 0 0 1px;
+  }
+  .tabs > li.active {
+    border-width: 1px 1px 0;
+    margin: 0 -1px;
+  }
+  .tabs-pane {
+    display: none;
+  }
+  .tabs-pane.active {
+    display: block;
+  }
+</style>
 <body>
 
-<script type="text/template" data-name="paragraph">
-  <p><input type="radio" checked="{{@content}}"> {{@content}}</p>
-</script>
-
-<script type="text/template" data-name="pane-inside">
-  <view name="paragraph" content="{{@content}}"></view>
-</script>
-
-<script type="text/template" data-name="body">
-  <tabs>
-    <pane title="One"><view name="pane-inside"><b>Hi</b></view></pane>
-    <pane title="Two"><view name="pane-inside" content="{{true}}">Ho</view></pane>
-    <pane title="Three"><view name="pane-inside" content="{{false}}">Ho</view></pane>
-    <pane title="Four"><view name="pane-inside" content="{{xxxx}}"></view></pane>
+<script type="text/template" id="body">
+  <tabs selectedIndex="{{2}}">
+    <pane title="One"><b>Hi</b></pane>
+    <pane title="Two">ho</pane>
+    <pane title="Three">away</pane>
+    <pane title="Four">we {{_page.punchline}}</pane>
   </tabs>
 </script>
 
-<script type="text/template" data-element="tabs" data-arrays="pane">
-  <ul>
-    {{each @pane}}
-      <li>{{this.title}}</li>
+<script type="text/template" id="tabs" data-element="tabs" data-arrays="pane">
+  <ul class="tabs">
+    {{each @pane as #pane, #i}}
+      <li class="{{if #i === selectedIndex}}active{{/}}" on-click="select(#i)">
+        {{#pane.title}}
+      </li>
     {{/each}}
   </ul>
-  {{each @pane}}
-    <div>{{this.content}}</div>
+  {{each @pane as #pane, #i}}
+    <div class="tabs-pane {{if #i === selectedIndex}}active{{/}}">{{#pane.content}}</div>
   {{/each}}
 </script>
 
-<script src="http://localhost:7777/derby-standalone.js"></script>
+<script src="/derby-standalone.js"></script>
 <script>
 var app = derby.createApp();
-var page = app.createPage();
 
 var templates = document.querySelectorAll('script[type="text/template"]');
 for (var i = 0; i < templates.length; i++) {
   var template = templates[i];
-  app.views.register(template.dataset.name, template.innerHTML, template.dataset);
+  app.views.register(template.id, template.innerHTML, template.dataset);
 }
+
+app.component('tabs', Tabs);
+function Tabs() {}
+Tabs.prototype.init = function(model) {
+  model.setNull('selectedIndex', 0);
+};
+Tabs.prototype.select = function(i) {
+  this.model.set('selectedIndex', i);
+};
+
+var page = app.createPage();
+page.model.set('_page.punchline', 'go');
 
 document.body.appendChild(page.getFragment('body'));
 </script>
