@@ -1,0 +1,26 @@
+{
+  "name": "derby-standalone",
+  "version": "0.1.0",
+  "description": "Client-side only version of Derby",
+  "main": "lib/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/codeparty/derby-standalone.git"
+  },
+  "keywords": [
+    "derby"
+  ],
+  "author": "Nate Smith",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/codeparty/derby-standalone/issues"
+  },
+  "dependencies": {
+    "derby": "~0.6"
+  },
+  "devDependencies": {
+    "express": "^3.5.1",
+    "browserify": "^3.38.1",
+    "minifyify": "^2.3.0"
+  }
+}

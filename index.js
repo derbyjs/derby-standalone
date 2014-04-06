@@ -1,5 +1,5 @@
-var DerbyStandalone = require('./DerbyStandalone');
-global.derby = new DerbyStandalone();
+var DerbyStandalone = require('derby/lib/DerbyStandalone');
+global.derby = module.exports = new DerbyStandalone();
 
 // Include template and expression parsing
-require('derby-html-parser');
+require('derby/node_modules/derby-parsing');
