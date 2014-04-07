@@ -3,3 +3,12 @@ global.derby = module.exports = new DerbyStandalone();
 
 // Include template and expression parsing
 require('derby/node_modules/derby-parsing');
+
+module.exports.App.prototype.registerViews = function(selector) {
+  selector || (selector = 'script[type="text/template"]');
+  var templates = document.querySelectorAll(selector);
+  for (var i = 0; i < templates.length; i++) {
+    var template = templates[i];
+    this.views.register(template.id, template.innerHTML, template.dataset);
+  }
+};
