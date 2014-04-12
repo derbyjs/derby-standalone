@@ -1,0 +1,25 @@
+{
+  "name": "derby-standalone",
+  "main": "dist/derby-standalone.js",
+  "version": "0.1.0",
+  "homepage": "https://github.com/codeparty/derby-standalone",
+  "authors": [
+    "Nate Smith <nate@lever.co>"
+  ],
+  "description": "create standalone derby applications in the browser",
+  "moduleType": [
+    "node"
+  ],
+  "keywords": [
+    "derby",
+    "framework"
+  ],
+  "license": "MIT",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ]
+}
