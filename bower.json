@@ -1,6 +1,6 @@
 {
   "name": "derby-standalone",
-  "main": "dist/derby-standalone.js",
+  "main": "dist/derby-standalone.min.js",
   "version": "0.1.0",
   "homepage": "https://github.com/codeparty/derby-standalone",
   "authors": [
