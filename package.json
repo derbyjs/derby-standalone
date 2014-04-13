@@ -21,6 +21,7 @@
   "devDependencies": {
     "express": "^3.5.1",
     "browserify": "^3.38.1",
-    "minifyify": "^2.3.0"
+    "minifyify": "^2.3.0",
+    "uglify-js": "~2.4.13"
   }
 }
