@@ -6,15 +6,22 @@ global.derby = module.exports = new DerbyStandalone();
 // Include template and expression parsing
 require('derby/node_modules/derby-parsing');
 
+module.exports.App.prototype.registerViews = function(selector) {
+  selector || (selector = 'script[type="text/template"]');
+  var templates = document.querySelectorAll(selector);
+  for (var i = 0; i < templates.length; i++) {
+    var template = templates[i];
+    this.views.register(template.id, template.innerHTML, template.dataset);
+  }
+};
+
 }).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{"derby/lib/DerbyStandalone":21,"derby/node_modules/derby-parsing":30}],2:[function(require,module,exports){
-/**
+/*!
  * The buffer module from node.js, for the browser.
  *
- * Author:   Feross Aboukhadijeh <feross@feross.org> <http://feross.org>
- * License:  MIT
- *
- * `npm install buffer`
+ * @author   Feross Aboukhadijeh <feross@feross.org> <http://feross.org>
+ * @license  MIT
  */
 
 var base64 = require('base64-js')
@@ -2438,8 +2445,8 @@ var substr = 'ab'.substr(-1) === 'b'
     }
 ;
 
-}).call(this,require("/Users/enjamini/code/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js"))
-},{"/Users/enjamini/code/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js":12}],14:[function(require,module,exports){
+}).call(this,require("/Users/enjalot/lever/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js"))
+},{"/Users/enjalot/lever/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js":12}],14:[function(require,module,exports){
 (function (global){
 /*! http://mths.be/punycode v1.2.4 by @mathias */
 ;(function(root) {
@@ -3130,10 +3137,6 @@ exports.decode = exports.parse = require('./decode');
 exports.encode = exports.stringify = require('./encode');
 
 },{"./decode":15,"./encode":16}],18:[function(require,module,exports){
-/*jshint strict:true node:true es5:true onevar:true laxcomma:true laxbreak:true eqeqeq:true immed:true latedef:true*/
-(function () {
-  "use strict";
-
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -3162,6 +3165,23 @@ exports.resolve = urlResolve;
 exports.resolveObject = urlResolveObject;
 exports.format = urlFormat;
 
+exports.Url = Url;
+
+function Url() {
+  this.protocol = null;
+  this.slashes = null;
+  this.auth = null;
+  this.host = null;
+  this.port = null;
+  this.hostname = null;
+  this.hash = null;
+  this.search = null;
+  this.query = null;
+  this.pathname = null;
+  this.path = null;
+  this.href = null;
+}
+
 // Reference: RFC 3986, RFC 1808, RFC 2396
 
 // define these here so at least they only have to be
@@ -3174,20 +3194,19 @@ var protocolPattern = /^([a-z0-9.+-]+:)/i,
     delims = ['<', '>', '"', '`', ' ', '\r', '\n', '\t'],
 
     // RFC 2396: characters not allowed for various reasons.
-    unwise = ['{', '}', '|', '\\', '^', '~', '`'].concat(delims),
+    unwise = ['{', '}', '|', '\\', '^', '`'].concat(delims),
 
     // Allowed by RFCs, but cause of XSS attacks.  Always escape these.
-    autoEscape = ['\''].concat(delims),
+    autoEscape = ['\''].concat(unwise),
     // Characters that are never ever allowed in a hostname.
     // Note that any invalid chars are also handled, but these
     // are the ones that are *expected* to be seen, so we fast-path
     // them.
-    nonHostChars = ['%', '/', '?', ';', '#']
-      .concat(unwise).concat(autoEscape),
-    nonAuthChars = ['/', '@', '?', '#'].concat(delims),
+    nonHostChars = ['%', '/', '?', ';', '#'].concat(autoEscape),
+    hostEndingChars = ['/', '?', '#'],
     hostnameMaxLen = 255,
-    hostnamePartPattern = /^[a-zA-Z0-9][a-z0-9A-Z_-]{0,62}$/,
-    hostnamePartStart = /^([a-zA-Z0-9][a-z0-9A-Z_-]{0,62})(.*)$/,
+    hostnamePartPattern = /^[a-z0-9A-Z_-]{0,63}$/,
+    hostnamePartStart = /^([a-z0-9A-Z_-]{0,63})(.*)$/,
     // protocols that can allow "unsafe" and "unwise" chars.
     unsafeProtocol = {
       'javascript': true,
@@ -3197,18 +3216,6 @@ var protocolPattern = /^([a-z0-9.+-]+:)/i,
     hostlessProtocol = {
       'javascript': true,
       'javascript:': true
-    },
-    // protocols that always have a path component.
-    pathedProtocol = {
-      'http': true,
-      'https': true,
-      'ftp': true,
-      'gopher': true,
-      'file': true,
-      'http:': true,
-      'ftp:': true,
-      'gopher:': true,
-      'file:': true
     },
     // protocols that always contain a // bit.
     slashedProtocol = {
@@ -3226,14 +3233,19 @@ var protocolPattern = /^([a-z0-9.+-]+:)/i,
     querystring = require('querystring');
 
 function urlParse(url, parseQueryString, slashesDenoteHost) {
-  if (url && typeof(url) === 'object' && url.href) return url;
+  if (url && isObject(url) && url instanceof Url) return url;
 
-  if (typeof url !== 'string') {
+  var u = new Url;
+  u.parse(url, parseQueryString, slashesDenoteHost);
+  return u;
+}
+
+Url.prototype.parse = function(url, parseQueryString, slashesDenoteHost) {
+  if (!isString(url)) {
     throw new TypeError("Parameter 'url' must be a string, not " + typeof url);
   }
 
-  var out = {},
-      rest = url;
+  var rest = url;
 
   // trim before proceeding.
   // This is to support parse stuff like "  http://foo.com  \n"
@@ -3243,7 +3255,7 @@ function urlParse(url, parseQueryString, slashesDenoteHost) {
   if (proto) {
     proto = proto[0];
     var lowerProto = proto.toLowerCase();
-    out.protocol = lowerProto;
+    this.protocol = lowerProto;
     rest = rest.substr(proto.length);
   }
 
@@ -3255,78 +3267,85 @@ function urlParse(url, parseQueryString, slashesDenoteHost) {
     var slashes = rest.substr(0, 2) === '//';
     if (slashes && !(proto && hostlessProtocol[proto])) {
       rest = rest.substr(2);
-      out.slashes = true;
+      this.slashes = true;
     }
   }
 
   if (!hostlessProtocol[proto] &&
       (slashes || (proto && !slashedProtocol[proto]))) {
+
     // there's a hostname.
     // the first instance of /, ?, ;, or # ends the host.
-    // don't enforce full RFC correctness, just be unstupid about it.
-
+    //
     // If there is an @ in the hostname, then non-host chars *are* allowed
-    // to the left of the first @ sign, unless some non-auth character
+    // to the left of the last @ sign, unless some host-ending character
     // comes *before* the @-sign.
     // URLs are obnoxious.
-    var atSign = rest.indexOf('@');
-    if (atSign !== -1) {
-      var auth = rest.slice(0, atSign);
+    //
+    // ex:
+    // http://a@b@c/ => user:a@b host:c
+    // http://a@b?@c => user:a host:c path:/?@c
 
-      // there *may be* an auth
-      var hasAuth = true;
-      for (var i = 0, l = nonAuthChars.length; i < l; i++) {
-        if (auth.indexOf(nonAuthChars[i]) !== -1) {
-          // not a valid auth.  Something like http://foo.com/bar@baz/
-          hasAuth = false;
-          break;
-        }
-      }
+    // v0.12 TODO(isaacs): This is not quite how Chrome does things.
+    // Review our test case against browsers more comprehensively.
 
-      if (hasAuth) {
-        // pluck off the auth portion.
-        out.auth = decodeURIComponent(auth);
-        rest = rest.substr(atSign + 1);
-      }
+    // find the first instance of any hostEndingChars
+    var hostEnd = -1;
+    for (var i = 0; i < hostEndingChars.length; i++) {
+      var hec = rest.indexOf(hostEndingChars[i]);
+      if (hec !== -1 && (hostEnd === -1 || hec < hostEnd))
+        hostEnd = hec;
     }
 
-    var firstNonHost = -1;
-    for (var i = 0, l = nonHostChars.length; i < l; i++) {
-      var index = rest.indexOf(nonHostChars[i]);
-      if (index !== -1 &&
-          (firstNonHost < 0 || index < firstNonHost)) firstNonHost = index;
-    }
-
-    if (firstNonHost !== -1) {
-      out.host = rest.substr(0, firstNonHost);
-      rest = rest.substr(firstNonHost);
+    // at this point, either we have an explicit point where the
+    // auth portion cannot go past, or the last @ char is the decider.
+    var auth, atSign;
+    if (hostEnd === -1) {
+      // atSign can be anywhere.
+      atSign = rest.lastIndexOf('@');
     } else {
-      out.host = rest;
-      rest = '';
+      // atSign must be in auth portion.
+      // http://a@b/c@d => host:b auth:a path:/c@d
+      atSign = rest.lastIndexOf('@', hostEnd);
     }
+
+    // Now we have a portion which is definitely the auth.
+    // Pull that off.
+    if (atSign !== -1) {
+      auth = rest.slice(0, atSign);
+      rest = rest.slice(atSign + 1);
+      this.auth = decodeURIComponent(auth);
+    }
+
+    // the host is the remaining to the left of the first non-host char
+    hostEnd = -1;
+    for (var i = 0; i < nonHostChars.length; i++) {
+      var hec = rest.indexOf(nonHostChars[i]);
+      if (hec !== -1 && (hostEnd === -1 || hec < hostEnd))
+        hostEnd = hec;
+    }
+    // if we still have not hit it, then the entire thing is a host.
+    if (hostEnd === -1)
+      hostEnd = rest.length;
+
+    this.host = rest.slice(0, hostEnd);
+    rest = rest.slice(hostEnd);
 
     // pull out port.
-    var p = parseHost(out.host);
-    var keys = Object.keys(p);
-    for (var i = 0, l = keys.length; i < l; i++) {
-      var key = keys[i];
-      out[key] = p[key];
-    }
+    this.parseHost();
 
     // we've indicated that there is a hostname,
     // so even if it's empty, it has to be present.
-    out.hostname = out.hostname || '';
+    this.hostname = this.hostname || '';
 
     // if hostname begins with [ and ends with ]
     // assume that it's an IPv6 address.
-    var ipv6Hostname = out.hostname[0] === '[' &&
-        out.hostname[out.hostname.length - 1] === ']';
+    var ipv6Hostname = this.hostname[0] === '[' &&
+        this.hostname[this.hostname.length - 1] === ']';
 
     // validate a little.
-    if (out.hostname.length > hostnameMaxLen) {
-      out.hostname = '';
-    } else if (!ipv6Hostname) {
-      var hostparts = out.hostname.split(/\./);
+    if (!ipv6Hostname) {
+      var hostparts = this.hostname.split(/\./);
       for (var i = 0, l = hostparts.length; i < l; i++) {
         var part = hostparts[i];
         if (!part) continue;
@@ -3354,38 +3373,44 @@ function urlParse(url, parseQueryString, slashesDenoteHost) {
             if (notHost.length) {
               rest = '/' + notHost.join('.') + rest;
             }
-            out.hostname = validParts.join('.');
+            this.hostname = validParts.join('.');
             break;
           }
         }
       }
     }
 
-    // hostnames are always lower case.
-    out.hostname = out.hostname.toLowerCase();
+    if (this.hostname.length > hostnameMaxLen) {
+      this.hostname = '';
+    } else {
+      // hostnames are always lower case.
+      this.hostname = this.hostname.toLowerCase();
+    }
 
     if (!ipv6Hostname) {
       // IDNA Support: Returns a puny coded representation of "domain".
       // It only converts the part of the domain name that
       // has non ASCII characters. I.e. it dosent matter if
       // you call it with a domain that already is in ASCII.
-      var domainArray = out.hostname.split('.');
+      var domainArray = this.hostname.split('.');
       var newOut = [];
       for (var i = 0; i < domainArray.length; ++i) {
         var s = domainArray[i];
         newOut.push(s.match(/[^A-Za-z0-9_-]/) ?
             'xn--' + punycode.encode(s) : s);
       }
-      out.hostname = newOut.join('.');
+      this.hostname = newOut.join('.');
     }
 
-    out.host = (out.hostname || '') +
-        ((out.port) ? ':' + out.port : '');
-    out.href += out.host;
+    var p = this.port ? ':' + this.port : '';
+    var h = this.hostname || '';
+    this.host = h + p;
+    this.href += this.host;
 
     // strip [ and ] from the hostname
+    // the host field still retains them, though
     if (ipv6Hostname) {
-      out.hostname = out.hostname.substr(1, out.hostname.length - 2);
+      this.hostname = this.hostname.substr(1, this.hostname.length - 2);
       if (rest[0] !== '/') {
         rest = '/' + rest;
       }
@@ -3414,38 +3439,39 @@ function urlParse(url, parseQueryString, slashesDenoteHost) {
   var hash = rest.indexOf('#');
   if (hash !== -1) {
     // got a fragment string.
-    out.hash = rest.substr(hash);
+    this.hash = rest.substr(hash);
     rest = rest.slice(0, hash);
   }
   var qm = rest.indexOf('?');
   if (qm !== -1) {
-    out.search = rest.substr(qm);
-    out.query = rest.substr(qm + 1);
+    this.search = rest.substr(qm);
+    this.query = rest.substr(qm + 1);
     if (parseQueryString) {
-      out.query = querystring.parse(out.query);
+      this.query = querystring.parse(this.query);
     }
     rest = rest.slice(0, qm);
   } else if (parseQueryString) {
     // no query string, but parseQueryString still requested
-    out.search = '';
-    out.query = {};
+    this.search = '';
+    this.query = {};
   }
-  if (rest) out.pathname = rest;
-  if (slashedProtocol[proto] &&
-      out.hostname && !out.pathname) {
-    out.pathname = '/';
+  if (rest) this.pathname = rest;
+  if (slashedProtocol[lowerProto] &&
+      this.hostname && !this.pathname) {
+    this.pathname = '/';
   }
 
   //to support http.request
-  if (out.pathname || out.search) {
-    out.path = (out.pathname ? out.pathname : '') +
-               (out.search ? out.search : '');
+  if (this.pathname || this.search) {
+    var p = this.pathname || '';
+    var s = this.search || '';
+    this.path = p + s;
   }
 
   // finally, reconstruct the href based on what has been validated.
-  out.href = urlFormat(out);
-  return out;
-}
+  this.href = this.format();
+  return this;
+};
 
 // format a parsed object into a url string
 function urlFormat(obj) {
@@ -3453,44 +3479,49 @@ function urlFormat(obj) {
   // If it's an obj, this is a no-op.
   // this way, you can call url_format() on strings
   // to clean up potentially wonky urls.
-  if (typeof(obj) === 'string') obj = urlParse(obj);
+  if (isString(obj)) obj = urlParse(obj);
+  if (!(obj instanceof Url)) return Url.prototype.format.call(obj);
+  return obj.format();
+}
 
-  var auth = obj.auth || '';
+Url.prototype.format = function() {
+  var auth = this.auth || '';
   if (auth) {
     auth = encodeURIComponent(auth);
     auth = auth.replace(/%3A/i, ':');
     auth += '@';
   }
 
-  var protocol = obj.protocol || '',
-      pathname = obj.pathname || '',
-      hash = obj.hash || '',
+  var protocol = this.protocol || '',
+      pathname = this.pathname || '',
+      hash = this.hash || '',
       host = false,
       query = '';
 
-  if (obj.host !== undefined) {
-    host = auth + obj.host;
-  } else if (obj.hostname !== undefined) {
-    host = auth + (obj.hostname.indexOf(':') === -1 ?
-        obj.hostname :
-        '[' + obj.hostname + ']');
-    if (obj.port) {
-      host += ':' + obj.port;
+  if (this.host) {
+    host = auth + this.host;
+  } else if (this.hostname) {
+    host = auth + (this.hostname.indexOf(':') === -1 ?
+        this.hostname :
+        '[' + this.hostname + ']');
+    if (this.port) {
+      host += ':' + this.port;
     }
   }
 
-  if (obj.query && typeof obj.query === 'object' &&
-      Object.keys(obj.query).length) {
-    query = querystring.stringify(obj.query);
+  if (this.query &&
+      isObject(this.query) &&
+      Object.keys(this.query).length) {
+    query = querystring.stringify(this.query);
   }
 
-  var search = obj.search || (query && ('?' + query)) || '';
+  var search = this.search || (query && ('?' + query)) || '';
 
   if (protocol && protocol.substr(-1) !== ':') protocol += ':';
 
   // only the slashedProtocols get the //.  Not mailto:, xmpp:, etc.
   // unless they had them to begin with.
-  if (obj.slashes ||
+  if (this.slashes ||
       (!protocol || slashedProtocol[protocol]) && host !== false) {
     host = '//' + (host || '');
     if (pathname && pathname.charAt(0) !== '/') pathname = '/' + pathname;
@@ -3501,40 +3532,68 @@ function urlFormat(obj) {
   if (hash && hash.charAt(0) !== '#') hash = '#' + hash;
   if (search && search.charAt(0) !== '?') search = '?' + search;
 
+  pathname = pathname.replace(/[?#]/g, function(match) {
+    return encodeURIComponent(match);
+  });
+  search = search.replace('#', '%23');
+
   return protocol + host + pathname + search + hash;
-}
+};
 
 function urlResolve(source, relative) {
-  return urlFormat(urlResolveObject(source, relative));
+  return urlParse(source, false, true).resolve(relative);
 }
+
+Url.prototype.resolve = function(relative) {
+  return this.resolveObject(urlParse(relative, false, true)).format();
+};
 
 function urlResolveObject(source, relative) {
   if (!source) return relative;
+  return urlParse(source, false, true).resolveObject(relative);
+}
 
-  source = urlParse(urlFormat(source), false, true);
-  relative = urlParse(urlFormat(relative), false, true);
+Url.prototype.resolveObject = function(relative) {
+  if (isString(relative)) {
+    var rel = new Url();
+    rel.parse(relative, false, true);
+    relative = rel;
+  }
+
+  var result = new Url();
+  Object.keys(this).forEach(function(k) {
+    result[k] = this[k];
+  }, this);
 
   // hash is always overridden, no matter what.
-  source.hash = relative.hash;
+  // even href="" will remove it.
+  result.hash = relative.hash;
 
+  // if the relative url is empty, then there's nothing left to do here.
   if (relative.href === '') {
-    source.href = urlFormat(source);
-    return source;
+    result.href = result.format();
+    return result;
   }
 
   // hrefs like //foo/bar always cut to the protocol.
   if (relative.slashes && !relative.protocol) {
-    relative.protocol = source.protocol;
+    // take everything except the protocol from relative
+    Object.keys(relative).forEach(function(k) {
+      if (k !== 'protocol')
+        result[k] = relative[k];
+    });
+
     //urlParse appends trailing / to urls like http://www.example.com
-    if (slashedProtocol[relative.protocol] &&
-        relative.hostname && !relative.pathname) {
-      relative.path = relative.pathname = '/';
+    if (slashedProtocol[result.protocol] &&
+        result.hostname && !result.pathname) {
+      result.path = result.pathname = '/';
     }
-    relative.href = urlFormat(relative);
-    return relative;
+
+    result.href = result.format();
+    return result;
   }
 
-  if (relative.protocol && relative.protocol !== source.protocol) {
+  if (relative.protocol && relative.protocol !== result.protocol) {
     // if it's a known url protocol, then changing
     // the protocol does weird things
     // first, if it's not file:, then we MUST have a host,
@@ -3544,10 +3603,14 @@ function urlResolveObject(source, relative) {
     // because that's known to be hostless.
     // anything else is assumed to be absolute.
     if (!slashedProtocol[relative.protocol]) {
-      relative.href = urlFormat(relative);
-      return relative;
+      Object.keys(relative).forEach(function(k) {
+        result[k] = relative[k];
+      });
+      result.href = result.format();
+      return result;
     }
-    source.protocol = relative.protocol;
+
+    result.protocol = relative.protocol;
     if (!relative.host && !hostlessProtocol[relative.protocol]) {
       var relPath = (relative.pathname || '').split('/');
       while (relPath.length && !(relative.host = relPath.shift()));
@@ -3555,72 +3618,72 @@ function urlResolveObject(source, relative) {
       if (!relative.hostname) relative.hostname = '';
       if (relPath[0] !== '') relPath.unshift('');
       if (relPath.length < 2) relPath.unshift('');
-      relative.pathname = relPath.join('/');
+      result.pathname = relPath.join('/');
+    } else {
+      result.pathname = relative.pathname;
     }
-    source.pathname = relative.pathname;
-    source.search = relative.search;
-    source.query = relative.query;
-    source.host = relative.host || '';
-    source.auth = relative.auth;
-    source.hostname = relative.hostname || relative.host;
-    source.port = relative.port;
-    //to support http.request
-    if (source.pathname !== undefined || source.search !== undefined) {
-      source.path = (source.pathname ? source.pathname : '') +
-                    (source.search ? source.search : '');
+    result.search = relative.search;
+    result.query = relative.query;
+    result.host = relative.host || '';
+    result.auth = relative.auth;
+    result.hostname = relative.hostname || relative.host;
+    result.port = relative.port;
+    // to support http.request
+    if (result.pathname || result.search) {
+      var p = result.pathname || '';
+      var s = result.search || '';
+      result.path = p + s;
     }
-    source.slashes = source.slashes || relative.slashes;
-    source.href = urlFormat(source);
-    return source;
+    result.slashes = result.slashes || relative.slashes;
+    result.href = result.format();
+    return result;
   }
 
-  var isSourceAbs = (source.pathname && source.pathname.charAt(0) === '/'),
+  var isSourceAbs = (result.pathname && result.pathname.charAt(0) === '/'),
       isRelAbs = (
-          relative.host !== undefined ||
+          relative.host ||
           relative.pathname && relative.pathname.charAt(0) === '/'
       ),
       mustEndAbs = (isRelAbs || isSourceAbs ||
-                    (source.host && relative.pathname)),
+                    (result.host && relative.pathname)),
       removeAllDots = mustEndAbs,
-      srcPath = source.pathname && source.pathname.split('/') || [],
+      srcPath = result.pathname && result.pathname.split('/') || [],
       relPath = relative.pathname && relative.pathname.split('/') || [],
-      psychotic = source.protocol &&
-          !slashedProtocol[source.protocol];
+      psychotic = result.protocol && !slashedProtocol[result.protocol];
 
   // if the url is a non-slashed url, then relative
   // links like ../.. should be able
   // to crawl up to the hostname, as well.  This is strange.
-  // source.protocol has already been set by now.
+  // result.protocol has already been set by now.
   // Later on, put the first path part into the host field.
   if (psychotic) {
-
-    delete source.hostname;
-    delete source.port;
-    if (source.host) {
-      if (srcPath[0] === '') srcPath[0] = source.host;
-      else srcPath.unshift(source.host);
+    result.hostname = '';
+    result.port = null;
+    if (result.host) {
+      if (srcPath[0] === '') srcPath[0] = result.host;
+      else srcPath.unshift(result.host);
     }
-    delete source.host;
+    result.host = '';
     if (relative.protocol) {
-      delete relative.hostname;
-      delete relative.port;
+      relative.hostname = null;
+      relative.port = null;
       if (relative.host) {
         if (relPath[0] === '') relPath[0] = relative.host;
         else relPath.unshift(relative.host);
       }
-      delete relative.host;
+      relative.host = null;
     }
     mustEndAbs = mustEndAbs && (relPath[0] === '' || srcPath[0] === '');
   }
 
   if (isRelAbs) {
     // it's absolute.
-    source.host = (relative.host || relative.host === '') ?
-                      relative.host : source.host;
-    source.hostname = (relative.hostname || relative.hostname === '') ?
-                      relative.hostname : source.hostname;
-    source.search = relative.search;
-    source.query = relative.query;
+    result.host = (relative.host || relative.host === '') ?
+                  relative.host : result.host;
+    result.hostname = (relative.hostname || relative.hostname === '') ?
+                      relative.hostname : result.hostname;
+    result.search = relative.search;
+    result.query = relative.query;
     srcPath = relPath;
     // fall through to the dot-handling below.
   } else if (relPath.length) {
@@ -3629,53 +3692,55 @@ function urlResolveObject(source, relative) {
     if (!srcPath) srcPath = [];
     srcPath.pop();
     srcPath = srcPath.concat(relPath);
-    source.search = relative.search;
-    source.query = relative.query;
-  } else if ('search' in relative) {
+    result.search = relative.search;
+    result.query = relative.query;
+  } else if (!isNullOrUndefined(relative.search)) {
     // just pull out the search.
     // like href='?foo'.
     // Put this after the other two cases because it simplifies the booleans
     if (psychotic) {
-      source.hostname = source.host = srcPath.shift();
+      result.hostname = result.host = srcPath.shift();
       //occationaly the auth can get stuck only in host
       //this especialy happens in cases like
       //url.resolveObject('mailto:local1@domain1', 'local2@domain2')
-      var authInHost = source.host && source.host.indexOf('@') > 0 ?
-                       source.host.split('@') : false;
+      var authInHost = result.host && result.host.indexOf('@') > 0 ?
+                       result.host.split('@') : false;
       if (authInHost) {
-        source.auth = authInHost.shift();
-        source.host = source.hostname = authInHost.shift();
+        result.auth = authInHost.shift();
+        result.host = result.hostname = authInHost.shift();
       }
     }
-    source.search = relative.search;
-    source.query = relative.query;
+    result.search = relative.search;
+    result.query = relative.query;
     //to support http.request
-    if (source.pathname !== undefined || source.search !== undefined) {
-      source.path = (source.pathname ? source.pathname : '') +
-                    (source.search ? source.search : '');
+    if (!isNull(result.pathname) || !isNull(result.search)) {
+      result.path = (result.pathname ? result.pathname : '') +
+                    (result.search ? result.search : '');
     }
-    source.href = urlFormat(source);
-    return source;
+    result.href = result.format();
+    return result;
   }
+
   if (!srcPath.length) {
     // no path at all.  easy.
     // we've already handled the other stuff above.
-    delete source.pathname;
+    result.pathname = null;
     //to support http.request
-    if (!source.search) {
-      source.path = '/' + source.search;
+    if (result.search) {
+      result.path = '/' + result.search;
     } else {
-      delete source.path;
+      result.path = null;
     }
-    source.href = urlFormat(source);
-    return source;
+    result.href = result.format();
+    return result;
   }
+
   // if a url ENDs in . or .., then it must get a trailing slash.
   // however, if it ends in anything else non-slashy,
   // then it must NOT get a trailing slash.
   var last = srcPath.slice(-1)[0];
   var hasTrailingSlash = (
-      (source.host || relative.host) && (last === '.' || last === '..') ||
+      (result.host || relative.host) && (last === '.' || last === '..') ||
       last === '');
 
   // strip single dots, resolve double dots to parent dir
@@ -3715,55 +3780,72 @@ function urlResolveObject(source, relative) {
 
   // put the host back
   if (psychotic) {
-    source.hostname = source.host = isAbsolute ? '' :
+    result.hostname = result.host = isAbsolute ? '' :
                                     srcPath.length ? srcPath.shift() : '';
     //occationaly the auth can get stuck only in host
     //this especialy happens in cases like
     //url.resolveObject('mailto:local1@domain1', 'local2@domain2')
-    var authInHost = source.host && source.host.indexOf('@') > 0 ?
-                     source.host.split('@') : false;
+    var authInHost = result.host && result.host.indexOf('@') > 0 ?
+                     result.host.split('@') : false;
     if (authInHost) {
-      source.auth = authInHost.shift();
-      source.host = source.hostname = authInHost.shift();
+      result.auth = authInHost.shift();
+      result.host = result.hostname = authInHost.shift();
     }
   }
 
-  mustEndAbs = mustEndAbs || (source.host && srcPath.length);
+  mustEndAbs = mustEndAbs || (result.host && srcPath.length);
 
   if (mustEndAbs && !isAbsolute) {
     srcPath.unshift('');
   }
 
-  source.pathname = srcPath.join('/');
-  //to support request.http
-  if (source.pathname !== undefined || source.search !== undefined) {
-    source.path = (source.pathname ? source.pathname : '') +
-                  (source.search ? source.search : '');
+  if (!srcPath.length) {
+    result.pathname = null;
+    result.path = null;
+  } else {
+    result.pathname = srcPath.join('/');
   }
-  source.auth = relative.auth || source.auth;
-  source.slashes = source.slashes || relative.slashes;
-  source.href = urlFormat(source);
-  return source;
-}
 
-function parseHost(host) {
-  var out = {};
+  //to support request.http
+  if (!isNull(result.pathname) || !isNull(result.search)) {
+    result.path = (result.pathname ? result.pathname : '') +
+                  (result.search ? result.search : '');
+  }
+  result.auth = relative.auth || result.auth;
+  result.slashes = result.slashes || relative.slashes;
+  result.href = result.format();
+  return result;
+};
+
+Url.prototype.parseHost = function() {
+  var host = this.host;
   var port = portPattern.exec(host);
   if (port) {
     port = port[0];
     if (port !== ':') {
-      out.port = port.substr(1);
+      this.port = port.substr(1);
     }
     host = host.substr(0, host.length - port.length);
   }
-  if (host) out.hostname = host;
-  return out;
+  if (host) this.hostname = host;
+};
+
+function isString(arg) {
+  return typeof arg === "string";
 }
 
-}());
+function isObject(arg) {
+  return typeof arg === 'object' && arg !== null;
+}
+
+function isNull(arg) {
+  return arg === null;
+}
+function isNullOrUndefined(arg) {
+  return  arg == null;
+}
 
 },{"punycode":14,"querystring":17}],19:[function(require,module,exports){
-(function (process,global,__dirname){
 /*
  * App.js
  *
@@ -3778,6 +3860,7 @@ var util = require('racer/lib/util');
 var derbyTemplates = require('derby-templates');
 var documentListeners = require('./documentListeners');
 var Page = require('./Page');
+var serializedViews = require('./_views');
 
 module.exports = App;
 
@@ -3809,62 +3892,172 @@ util.mergeInto(App.prototype, EventEmitter.prototype);
 
 // Overriden on server
 App.prototype._init = function() {
-  var serializedViews = require('./_views');
-  serializedViews(derbyTemplates, this.views);
-
+  this._waitForAttach = true;
+  this._cancelAttach = false;
   this.model = new this.derby.Model();
-
-  // Init async so that app.on('model') listeners can be added
-  var app = this;
-  process.nextTick(function() {
-    app.emit('model', app.model);
-
-    var script = app._getScript();
-    var data = JSON.parse(script.getAttribute('data-bundle'));
-    script.removeAttribute('data-bundle');
-    app.model.createConnection(data);
-    app.model.unbundle(data);
-    app._autoRefresh();
-    var page = app.createPage();
-    page.params = app.model.get('$render.params');
+  this.model.createConnection();
+  serializedViews(derbyTemplates, this.views);
+  // Must init async so that app.on('model') listeners can be added.
+  // Must also wait for content ready so that bundle is fully downloaded.
+  this._contentReady();
+};
+App.prototype._finishInit = function() {
+  this.emit('model', this.model);
+  var script = this._getScript();
+  var data;
+  try {
+    data = JSON.parse(script.nextSibling.innerHTML);
+  } catch (err) {
+    var json = script.nextSibling && script.nextSibling.innerHTML;
+    this.emit('error', err, json);
+  }
+  util.isProduction = data.nodeEnv === 'production';
+  if (!util.isProduction) this._autoRefresh();
+  this.model.unbundle(data);
+  var page = this.createPage();
+  page.params = this.model.get('$render.params');
+  this.emit('ready', page);
+  this._waitForAttach = false;
+  // Instead of attaching, do a route and render if a link was clicked before
+  // the page finished attaching
+  if (this._cancelAttach) {
+    this.history.refresh();
+    return;
+  }
+  try {
+    // Attach to the currently rendered DOM. This will fail if there is any
+    // slight mismatch between the rendered HTML and the client-side render
     page.attach();
-    app.emit('ready');
-  });
+  } catch (err) {
+    // Since an attachment failure is *fatal* and could happen as a result of a
+    // browser extension like AdBlock, an invalid template, or a small bug in
+    // Derby or Saddle, re-render from scratch on production failures
+    if (util.isProduction) this.history.refresh();
+    this.emit('error', err);
+  }
+};
+// Modified from: https://github.com/addyosmani/jquery.parts/blob/master/jquery.documentReady.js
+App.prototype._contentReady = function() {
+  // Is the DOM ready to be used? Set to true once it occurs.
+  var isReady = false;
+  var app = this;
+
+  // The ready event handler
+  function onDOMContentLoaded() {
+    if (document.addEventListener) {
+      document.removeEventListener('DOMContentLoaded', onDOMContentLoaded, false);
+    } else {
+      // we're here because readyState !== 'loading' in oldIE
+      // which is good enough for us to call the dom ready!
+      document.detachEvent('onreadystatechange', onDOMContentLoaded);
+    }
+    onDOMReady();
+  }
+
+  // Handle when the DOM is ready
+  function onDOMReady() {
+    // Make sure that the DOM is not already loaded
+    if (isReady) return;
+    // Make sure body exists, at least, in case IE gets a little overzealous (ticket #5443).
+    if (!document.body) return setTimeout(onDOMReady, 0);
+    // Remember that the DOM is ready
+    isReady = true;
+    // Make sure this is always async and then finishin init
+    setTimeout(function() {
+      app._finishInit();
+    }, 0);
+  }
+
+  // The DOM ready check for Internet Explorer
+  function doScrollCheck() {
+    if (isReady) return;
+    try {
+      // If IE is used, use the trick by Diego Perini
+      // http://javascript.nwbox.com/IEContentLoaded/
+      document.documentElement.doScroll('left');
+    } catch (err) {
+      setTimeout(doScrollCheck, 0);
+      return;
+    }
+    // and execute any waiting functions
+    onDOMReady();
+  }
+
+  // Catch cases where called after the browser event has already occurred.
+  if (document.readyState !== 'loading') return onDOMReady();
+
+  // Mozilla, Opera and webkit nightlies currently support this event
+  if (document.addEventListener) {
+    // Use the handy event callback
+    document.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
+    // A fallback to window.onload, that will always work
+    window.addEventListener('load', onDOMContentLoaded, false);
+    // If IE event model is used
+  } else if (document.attachEvent) {
+    // ensure firing before onload,
+    // maybe late but safe also for iframes
+    document.attachEvent('onreadystatechange', onDOMContentLoaded);
+    // A fallback to window.onload, that will always work
+    window.attachEvent('onload', onDOMContentLoaded);
+    // If IE and not a frame
+    // continually check to see if the document is ready
+    var toplevel;
+    try {
+      toplevel = window.frameElement == null;
+    } catch (err) {}
+    if (document.documentElement.doScroll && toplevel) {
+      doScrollCheck();
+    }
+  }
 };
 
 App.prototype._getScript = function() {
-  return document.querySelector('script[src="/derby/' + this.name + '"]');
+  return document.querySelector('script[src^="/derby/' + this.name + '"]');
 };
 
 App.prototype.use = util.use;
+App.prototype.serverUse = util.serverUse;
 
 App.prototype.loadViews = function() {};
 
 App.prototype.loadStyles = function() {};
 
 App.prototype.createPage = function() {
-  if (this.page) this.page.destroy();
+  if (this.page) {
+    this.emit('destroyPage', this.page);
+    this.page.destroy();
+  }
   var page = new this.Page(this, this.model);
   this.page = page;
   return page;
 };
 
-App.prototype.onRoute = function(callback, page, params, next, isTransitional, done) {
-  if (isTransitional) {
-    if (callback.length === 4) {
-      callback(page.model, params, next, done);
-      return true;
-    } else {
-      callback(page.model, params, next);
-      return;
-    }
+App.prototype.onRoute = function(callback, page, next, done) {
+  if (this._waitForAttach) {
+    // Cancel any routing before the initial page attachment. Instead, do a
+    // render once derby is ready
+    this._cancelAttach = true;
+    return;
   }
-  callback(page, page.model, params, next);
+  this.emit('route', page);
+  // HACK: To update render in transitional routes
+  page.model.set('$render.params', page.params);
+  page.model.set('$render.url', page.params.url);
+  page.model.set('$render.query', page.params.query);
+  // If transitional
+  if (done) {
+    var app = this;
+    var _done = function() {
+      app.emit('routeDone', page, 'transition');
+      done();
+    };
+    callback.call(page, page, page.model, page.params, next, _done);
+    return;
+  }
+  callback.call(page, page, page.model, page.params, next);
 };
 
 App.prototype._autoRefresh = function() {
-  if (util.isProduction) return;
-
   var app = this;
   this.model.on('change', '$connection.state', function(state) {
     if (state === 'connected') registerClient();
@@ -3876,7 +4069,7 @@ App.prototype._autoRefresh = function() {
     app.page.render(ns);
   });
   function registerClient() {
-    var data = {name: app.name, hash: global.DERBY_SCRIPT_HASH};
+    var data = {name: app.name, hash: '{{DERBY_SCRIPT_HASH}}'};
     app.model.channel.send('derby:app', data, function(err) {
       if (!err) return;
       // Reload in a timeout so that returning fetches have time to complete
@@ -3889,19 +4082,22 @@ App.prototype._autoRefresh = function() {
   registerClient();
 };
 
-util.serverRequire(__dirname + '/App.server');
+util.serverRequire(module, './App.server');
 
-}).call(this,require("/Users/enjamini/code/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js"),typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},"/node_modules/derby/lib")
-},{"./Page":23,"./_views":24,"./documentListeners":26,"/Users/enjamini/code/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js":12,"derby-templates":33,"events":11,"racer/lib/util":56,"tracks":61}],20:[function(require,module,exports){
+},{"./Page":23,"./_views":24,"./documentListeners":26,"derby-templates":42,"events":11,"racer/lib/util":64,"tracks":69}],20:[function(require,module,exports){
 var EventEmitter = require('events').EventEmitter;
 var util = require('racer/lib/util');
 var Dom = require('./Dom');
 
 module.exports = Controller;
 
-function Controller() {
+function Controller(app, page, model) {
   EventEmitter.call(this);
   this.dom = new Dom(this);
+  this.app = app;
+  this.page = page;
+  this.model = model;
+  model.data.$controller = this;
 }
 
 util.mergeInto(Controller.prototype, EventEmitter.prototype);
@@ -3936,7 +4132,7 @@ Controller.prototype.emitDelayable = function() {
   return delayed;
 };
 
-},{"./Dom":22,"events":11,"racer/lib/util":56}],21:[function(require,module,exports){
+},{"./Dom":22,"events":11,"racer/lib/util":64}],21:[function(require,module,exports){
 var EventEmitter = require('events').EventEmitter;
 var Model = require('racer/lib/Model/ModelStandalone');
 var util = require('racer/lib/util');
@@ -3954,6 +4150,7 @@ function DerbyStandalone() {
   EventEmitter.call(this);
 }
 util.mergeInto(DerbyStandalone.prototype, EventEmitter.prototype);
+Model.prototype.unloadAll = function() {};
 DerbyStandalone.prototype.Model = Model;
 DerbyStandalone.prototype.util = util;
 
@@ -3971,7 +4168,7 @@ App.prototype._init = function() {
   this.createPage();
 };
 
-},{"./App":19,"./Page":23,"./components":25,"./documentListeners":26,"events":11,"racer/lib/Model/ModelStandalone":45,"racer/lib/util":56}],22:[function(require,module,exports){
+},{"./App":19,"./Page":23,"./components":25,"./documentListeners":26,"events":11,"racer/lib/Model/ModelStandalone":53,"racer/lib/util":64}],22:[function(require,module,exports){
 module.exports = Dom;
 
 function Dom(controller) {
@@ -4062,7 +4259,7 @@ DomListener.prototype.remove = function() {
 };
 
 },{}],23:[function(require,module,exports){
-(function (global,__dirname){
+(function (global){
 var derbyTemplates = require('derby-templates');
 var contexts = derbyTemplates.contexts;
 var expressions = derbyTemplates.expressions;
@@ -4071,14 +4268,12 @@ var util = require('racer/lib/util');
 var EventModel = require('./eventmodel');
 var textDiff = require('./textDiff');
 var Controller = require('./Controller');
+var documentListeners = require('./documentListeners');
 
 module.exports = Page;
 
 function Page(app, model, req, res) {
-  Controller.call(this);
-  this.page = this;
-  this.app = app;
-  this.model = model;
+  Controller.call(this, app, this, model);
   this.req = req;
   this.res = res;
   this.params = null;
@@ -4092,7 +4287,7 @@ function Page(app, model, req, res) {
 
 // Inherit from the global object so that global functions and constructors are
 // available for use as template helpers.
-// 
+//
 // It's important that the page controller doesn't have a parent, since this
 // could cause an infinite loop in controller function lookup
 Page.prototype = Object.create(global, {parent: {value: null}});
@@ -4130,10 +4325,10 @@ Page.prototype._setRenderPrefix = function(ns) {
   this.model.set('$render.prefix', prefix);
 };
 
-Page.prototype.get = function(viewName, ns) {
+Page.prototype.get = function(viewName, ns, unescaped) {
   this._setRenderPrefix(ns);
   var view = this.getView(viewName, ns);
-  return view.get(this.context, view.string);
+  return view.get(this.context, unescaped);
 };
 
 Page.prototype.getFragment = function(viewName, ns) {
@@ -4147,25 +4342,26 @@ Page.prototype.getView = function(viewName, ns) {
 };
 
 Page.prototype.render = function(ns) {
+  this.app.emit('render', this);
   this.context.pause();
   this._setRenderParams(ns);
-  var fragment = this.getFragment('Page', ns);
-
-  // This hack prevents browsers from bleeding scroll state when replacing
-  // the entire document body. Reading a positioning property forces layout
-  // on an empty page.
-  document.body.innerHTML = '';
-  document.body.offsetTop;
-
-  document.replaceChild(fragment, document.documentElement);
+  var titleFragment = this.getFragment('TitleElement', ns);
+  var bodyFragment = this.getFragment('BodyElement', ns);
+  var titleElement = document.getElementsByTagName('title')[0];
+  titleElement.parentNode.replaceChild(titleFragment, titleElement);
+  document.body.parentNode.replaceChild(bodyFragment, document.body);
   this.context.unpause();
+  this.app.emit('routeDone', this, 'render');
 };
 
 Page.prototype.attach = function() {
   this.context.pause();
   var ns = this.model.get('$render.ns');
-  var view = this.getView('Page', ns);
-  view.attachTo(document, document.firstChild, this.context);
+  var titleView = this.getView('TitleElement', ns);
+  var bodyView = this.getView('BodyElement', ns);
+  var titleElement = document.getElementsByTagName('title')[0];
+  titleView.attachTo(titleElement.parentNode, titleElement, this.context);
+  bodyView.attachTo(document.body.parentNode, document.body, this.context);
   if (this.create) this.create(this.model, this.dom);
   this.context.unpause();
 };
@@ -4198,7 +4394,7 @@ Page.prototype.destroy = function() {
   silentModel.destroy('_page');
   silentModel.destroy('$components');
   // Unfetch and unsubscribe from all queries and documents
-  silentModel.unloadAll && silentModel.unloadAll();
+  silentModel.unloadAll();
 };
 
 Page.prototype._addModelListeners = function(eventModel) {
@@ -4230,13 +4426,23 @@ Page.prototype._addModelListeners = function(eventModel) {
   var insertListener = model.on('insert', '**', function onInsert(path, index, values) {
     var segments = util.castSegments(path.split('.'));
     context.pause();
-    eventModel.insert(segments, index, values.length);
+    var array = model.get(path);
+    if (values.length < array.length) {
+      eventModel.insert(segments, index, values.length);
+    } else {
+      eventModel.set(segments);
+    }
     context.unpause();
   });
   var removeListener = model.on('remove', '**', function onRemove(path, index, values) {
     var segments = util.castSegments(path.split('.'));
     context.pause();
-    eventModel.remove(segments, index, values.length);
+    var array = model.get(path);
+    if (array && array.length) {
+      eventModel.remove(segments, index, values.length);
+    } else {
+      eventModel.set(segments);
+    }
     context.unpause();
   });
   var moveListener = model.on('move', '**', function onMove(path, from, to, howMany) {
@@ -4259,6 +4465,7 @@ Page.prototype._addModelListeners = function(eventModel) {
 Page.prototype._addContextListeners = function(eventModel) {
   this.context.meta.addBinding = addBinding;
   this.context.meta.removeBinding = removeBinding;
+  this.context.meta.removeNode = removeNode;
   this.context.meta.addItemContext = addItemContext;
   this.context.meta.removeItemContext = removeItemContext;
 
@@ -4277,11 +4484,20 @@ Page.prototype._addContextListeners = function(eventModel) {
         addDependencies(eventModel, expressions[i], binding);
       }
     } else {
-      addDependencies(eventModel, binding.template.expression, binding);
+      var expression = binding.template.expression;
+      var blockType = expression.meta && expression.meta.blockType;
+      if (blockType === 'with') return;
+      addDependencies(eventModel, expression, binding);
     }
   }
   function removeBinding(binding) {
     eventModel.removeBinding(binding);
+  }
+  function removeNode(node) {
+    var component = node.$markComponent;
+    if (component && !component.singleton) {
+      component.destroy();
+    }
   }
 };
 
@@ -4289,7 +4505,8 @@ function addDependencies(eventModel, expression, binding) {
   var dependencies = expression.dependencies(binding.context);
   if (!dependencies) return;
   for (var i = 0, len = dependencies.length; i < len; i++) {
-    eventModel.addBinding(dependencies[i], binding);
+    var dependency = dependencies[i];
+    if (dependency) eventModel.addBinding(dependency, binding);
   }
 }
 
@@ -4297,30 +4514,52 @@ function patchTextBinding(binding) {
   if (
     binding instanceof templates.AttributeBinding &&
     binding.name === 'value' &&
-    (binding.element.tagName === 'INPUT' || binding.element.tagName === 'TEXTAREA') &&
+    binding.element.tagName === 'INPUT' &&
+    documentListeners.inputSupportsSelection(binding.element) &&
     binding.template.expression.resolve(binding.context)
   ) {
-    binding.update = textUpdate;
+    binding.update = textInputUpdate;
+
+  } else if (
+    binding instanceof templates.NodeBinding &&
+    binding.node.parentNode.tagName === 'TEXTAREA' &&
+    binding.template.expression.resolve(binding.context)
+  ) {
+    binding.update = textAreaUpdate;
   }
 }
 
-function textUpdate(pass) {
+function textInputUpdate(pass) {
+  textUpdate(this, this.element, pass);
+}
+function textAreaUpdate(pass) {
+  var element = this.node.parentNode;
+  if (element) textUpdate(this, element, pass);
+}
+function textUpdate(binding, element, pass) {
   if (pass) {
-    if (pass.$event && pass.$event.target === this.element) {
+    if (pass.$event && pass.$event.target === element) {
       return;
     } else if (pass.$type === 'stringInsert') {
-      return textDiff.onStringInsert(this.element, pass.previous, pass.index, pass.text);
+      return textDiff.onStringInsert(element, pass.previous, pass.index, pass.text);
     } else if (pass.$type === 'stringRemove') {
-      return textDiff.onStringRemove(this.element, pass.previous, pass.index, pass.howMany);
+      return textDiff.onStringRemove(element, pass.previous, pass.index, pass.howMany);
     }
   }
-  this.template.update(this.context, this);
+
+  if (element.tagName === 'TEXTAREA') {
+    var template = binding.template;
+    var value = template.expression.get(binding.context);
+    return element.value = template.stringify(value);
+  }
+
+  binding.template.update(binding.context, binding);
 }
 
-util.serverRequire(__dirname + '/Page.server');
+util.serverRequire(module, './Page.server');
 
-}).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},"/node_modules/derby/lib")
-},{"./Controller":20,"./eventmodel":27,"./textDiff":28,"derby-templates":33,"racer/lib/util":56}],24:[function(require,module,exports){
+}).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"./Controller":20,"./documentListeners":26,"./eventmodel":27,"./textDiff":28,"derby-templates":42,"racer/lib/util":64}],24:[function(require,module,exports){
 // This file is intentionally empty.
 // It's used in browserifying as the placeholder for serialized views.
 
@@ -4347,64 +4586,90 @@ exports.ComponentFactory = ComponentFactory;
 exports.SingletonComponentFactory = SingletonComponentFactory;
 exports.createFactory = createFactory;
 
-function Component(id, model, parent) {
-  this.id = id;
-  this.model = model;
+function Component(parent, context, id, scope) {
   this.parent = parent;
-  this.page = parent && parent.page;
-  this.app = this.page && this.page.app;
-  this._scope = ['$components', id];
+  this.context = context;
+  this.id = id;
+  this._scope = scope;
 }
 
 util.mergeInto(Component.prototype, Controller.prototype);
 
 Component.prototype.destroy = function() {
   this.emit('destroy');
+  this.model.removeContextListeners();
+  this.model.destroy();
+  delete this.page._components[this.id];
+  var components = this.page._eventModel.object.$components;
+  if (components) delete components.object[this.id];
 };
 
-function createComponent(Constructor, context, componentContext, parent, attributes) {
-  var id = context.id();
-  var scope = '$components.' + id;
-  var root = context.controller.model.root;
-  var model = root.scope(scope);
-  model.set('id', id);
-  // Store a reference to the component's scope such that the expression
-  // getters are relative to the component
-  model.data = model.get();
+Component.prototype.get = function(viewName, unescaped) {
+  var view = this.getView(viewName);
+  return view.get(this.context, unescaped);
+};
 
-  // Render current attribute values and set on component model
-  if (attributes) {
-    for (var key in attributes) {
-      var attribute = attributes[key];
-      if (attribute instanceof templates.ParentWrapper) {
-        var segments = attribute.expression && attribute.expression.pathSegments(context);
-        if (segments) {
-          root.ref(scope + '.' + key, segments.join('.'));
-        } else {
-          var value = attribute.get(componentContext);
-          model.set(key, value);
-        }
-      } else if (typeof attribute === 'object') {
-        var value = expressions.renderValue(attribute, componentContext);
-        model.set(key, value);
-      } else {
-        model.set(key, attribute);
-      }
-    }
-  }
+Component.prototype.getFragment = function(viewName) {
+  var view = this.getView(viewName);
+  return view.getFragment(this.context);
+};
 
-  // Create the component instance. The component constructor should be an
-  // empty function and the actual initialization code should be done in the
+Component.prototype.getView = function(viewName) {
+  var contextView = this.context.getView();
+  return (viewName) ?
+    this.app.views.find(viewName, contextView.namespace) : contextView;
+};
+
+Component.prototype.getAttribute = function(key) {
+  var attributeContext = this.context.forAttribute(key);
+  if (!attributeContext) return;
+  var value = attributeContext.attributes[key];
+  return value && expressions.renderValue(value, attributeContext);
+};
+
+Component.prototype.setAttribute = function(key, value) {
+  this.context.parent.attributes[key] = value;
+};
+
+Component.prototype.setNullAttribute = function(key, value) {
+  var attributes = this.context.parent.attributes;
+  if (attributes[key] == null) attributes[key] = value;
+};
+
+function initComponent(context, component, parent, model, id, scope) {
+  // Do generic controller initialization
+  var componentContext = context.componentChild(component);
+  Controller.call(component, parent.app, parent.page, model);
+  Component.call(component, parent, componentContext, id, scope);
+
+  // Do the user-specific initialization. The component constructor should be
+  // an empty function and the actual initialization code should be done in the
   // component's init method. This means that we don't have to rely on users
   // properly calling the Component constructor method and avoids having to
   // play nice with how CoffeeScript extends class constructors
-  var component = componentContext.controller = new Constructor();
-  Controller.call(component);
-  Component.call(component, id, model, parent);
   emitHooks(context, component);
   component.emit('init', component);
   if (component.init) component.init(model);
-  return component;
+
+  return componentContext;
+}
+
+function setAttributes(context, model) {
+  if (!context.attributes) return;
+  // Set attribute values on component model
+  for (var key in context.attributes) {
+    var attribute = context.attributes[key];
+    var segments = (
+      attribute instanceof templates.ParentWrapper &&
+      attribute.expression &&
+      attribute.expression.pathSegments(context)
+    );
+    if (segments) {
+      model.root.ref(model._at + '.' + key, segments.join('.'));
+    } else {
+      model.set(key, attribute);
+    }
+  }
 }
 
 function emitHooks(context, component) {
@@ -4425,16 +4690,21 @@ function ComponentFactory(constructor) {
   this.constructor = constructor;
 }
 ComponentFactory.prototype.init = function(context) {
-  var componentContext = context.componentChild();
-  var component = createComponent(
-    this.constructor,
-    context,
-    componentContext,
-    context.controller,
-    context.attributes
-  );
-  component.page._components[component.id] = component;
-  return componentContext;
+  var component = new this.constructor();
+
+  var parent = context.controller;
+  var id = context.id();
+  var scope = ['$components', id];
+  var model = parent.model.root.eventContext(component);
+  model._at = scope.join('.');
+  model.set('id', id);
+  setAttributes(context, model);
+  // Store a reference to the component's scope such that the expression
+  // getters are relative to the component
+  model.data = model.get();
+  parent.page._components[id] = component;
+
+  return initComponent(context, component, parent, model, id, scope);
 };
 ComponentFactory.prototype.create = function(context) {
   var component = context.controller;
@@ -4448,27 +4718,22 @@ ComponentFactory.prototype.create = function(context) {
 function SingletonComponentFactory(constructor) {
   this.constructor = constructor;
   this.component = null;
-  this.created = false;
 }
 SingletonComponentFactory.prototype.init = function(context) {
-  var componentContext = context.componentChild();
+  var componentContext;
   if (this.component) {
-    componentContext.controller = this.component;
+    componentContext = context.componentChild(this.component);
     emitHooks(context, this.component);
   } else {
-    this.component = createComponent(this.constructor, context, componentContext);
+    this.component = new this.constructor();
+    var parent = context.controller.page;
+    var model = parent.model;
+    componentContext = initComponent(context, this.component, parent, model);
   }
   return componentContext;
 };
-SingletonComponentFactory.prototype.create = function(context) {
-  var component = context.controller;
-  component.emit('create', component);
-  // Call the component's create function for the first view render
-  if (!this.created && component.create) {
-    this.created = true;
-    component.create(component.model, component.dom);
-  }
-};
+// Don't call the create method for singleton components
+SingletonComponentFactory.prototype.create = function() {};
 
 App.prototype.component = function(viewName, constructor) {
   if (typeof viewName === 'function') {
@@ -4482,7 +4747,7 @@ App.prototype.component = function(viewName, constructor) {
   // Load template view from filename
   if (constructor.prototype.view) {
     var viewFilename = constructor.prototype.view;
-    viewName = path.basename(viewFilename, '.html');
+    viewName = constructor.prototype.name || path.basename(viewFilename, '.html');
     this.loadViews(viewFilename, viewName);
 
   } else if (!viewName) {
@@ -4516,19 +4781,31 @@ function extendComponent(constructor) {
   util.mergeInto(constructor.prototype, oldPrototype);
 }
 
-},{"./App":19,"./Controller":20,"derby-templates":33,"path":13,"racer/lib/util":56}],26:[function(require,module,exports){
+},{"./App":19,"./Controller":20,"derby-templates":42,"path":13,"racer/lib/util":64}],26:[function(require,module,exports){
 var textDiff = require('./textDiff');
 
 exports.add = addDocumentListeners;
+exports.inputSupportsSelection = inputSupportsSelection;
 
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-input-element.html#do-not-apply
-var INPUT_TYPE_SUPPORTS_SELECTION = {
-  text: true
-, search: true
-, url: true
-, tel: true
-, password: true
-};
+// TODO: Date types support
+function inputSupportsSelection(input) {
+  var type = input.type;
+  return (
+    type === 'text' ||
+    type === 'search' ||
+    type === 'url' ||
+    type === 'tel' ||
+    type === 'password'
+  );
+}
+function inputIsNumberValue(input) {
+  var type = input.type;
+  return (type === 'number' || (type === 'range' && !input.multiple));
+}
+function inputValue(input) {
+  return inputIsNumberValue(input) ? input.valueAsNumber : input.value;
+}
 
 function addDocumentListeners(doc) {
   doc.addEventListener('input', documentInput, true);
@@ -4537,38 +4814,38 @@ function addDocumentListeners(doc) {
 
 function documentInput(e) {
   var target = e.target;
-  if (!target) return;
-  var bindAttributes = target.$bindAttributes;
-  if (!bindAttributes) return;
-  var tagName = target.tagName.toLowerCase();
-  var pass = {$event: e};
 
-  if ((tagName === 'input' || tagName === 'textarea') && bindAttributes.value) {
-    var binding = bindAttributes.value;
-    if (INPUT_TYPE_SUPPORTS_SELECTION[target.type]) {
+  if (target.tagName === 'INPUT') {
+    var binding = target.$bindAttributes && target.$bindAttributes.value;
+    if (!binding || binding.isUnbound()) return;
+
+    if (inputSupportsSelection(target)) {
+      var pass = {$event: e};
       textDiffBinding(binding, target.value, pass);
     } else {
-      binding.template.expression.set(binding.context, target.value);
+      var value = inputValue(target);
+      binding.template.expression.set(binding.context, value);
     }
 
-  } else if (target.isContentEditable) {
-    // TODO
+  } else if (target.tagName === 'TEXTAREA' && target.childNodes.length === 1) {
+    var binding = target.firstChild && target.firstChild.$bindNode;
+    if (!binding || binding.isUnbound()) return;
+
+    var pass = {$event: e};
+    textDiffBinding(binding, target.value, pass);
   }
 }
 
 function documentChange(e) {
   var target = e.target;
-  if (!target) return;
   var bindAttributes = target.$bindAttributes;
-  var tagName = target.tagName.toLowerCase();
 
-  if (tagName === 'input') {
-    if (bindAttributes && bindAttributes.checked) {
-      var binding = bindAttributes.checked;
-      binding.template.expression.set(binding.context, target.checked);
-    }
+  if (target.tagName === 'INPUT') {
+    var binding = target.$bindAttributes && target.$bindAttributes.checked;
+    if (!binding || binding.isUnbound()) return;
+    binding.template.expression.set(binding.context, target.checked);
 
-  } else if (tagName === 'select') {
+  } else if (target.tagName === 'SELECT') {
     setOptionBindings(target);
   }
 }
@@ -4586,9 +4863,10 @@ function textDiffBinding(binding, value, pass) {
 
 function setOptionBindings(parent) {
   for (var node = parent.firstChild; node; node = node.nextSibling) {
-    if (node.tagName && node.tagName.toLowerCase() === 'option') {
+    if (node.tagName === 'OPTION') {
       var binding = node.$bindAttributes && node.$bindAttributes.selected;
-      if (binding) binding.template.expression.set(binding.context, node.selected);
+      if (!binding || binding.isUnbound()) continue;
+      binding.template.expression.set(binding.context, node.selected);
     } else if (node.hasChildNodes()) {
       setOptionBindings(node);
     }
@@ -4654,7 +4932,7 @@ function ModelRef(model, item, segments, outside) {
   // value.
   this.model = model;
   this.segments = segments;
- 
+
   // Our current value.
   this.item = item;
 
@@ -4665,7 +4943,7 @@ function ModelRef(model, item, segments, outside) {
   // result is the EventModel of the evaluated version of the brackets. In
   // x[y].z, its the EventModel of x[y].
   this.result = outside.child(item).refChild(this);
-};
+}
 
 ModelRef.prototype.update = function() {
   var segments = expressions.pathSegments(this.segments);
@@ -4695,7 +4973,7 @@ function ItemContextsMap() {}
 
 function EventModel() {
   this.id = nextId++;
-  
+
   // Most of these won't ever be filled in, so I'm just leaving them null.
   //
   // These contain our EventModel children.
@@ -4812,11 +5090,11 @@ EventModel.prototype.at = function(segments) {
 };
 
 EventModel.prototype.isEmpty = function() {
-  if (!isEmpty(this.dependancies)) return false;
-  if (!isEmpty(this.itemContexts)) return false;
+  if (hasKeys(this.dependancies)) return false;
+  if (hasKeys(this.itemContexts)) return false;
 
   if (this.object) {
-    for (var k in this.object) return false;
+    if (hasKeys(this.object)) return false;
     this.object = null;
   }
 
@@ -4836,6 +5114,13 @@ EventModel.prototype.isEmpty = function() {
 
   return true;
 };
+
+function hasKeys(object) {
+  for (var key in object) {
+    return true;
+  }
+  return false;
+}
 
 
 // **** Updating the EventModel
@@ -4918,16 +5203,20 @@ EventModel.prototype._each = function(segments, pos, fn) {
 // on this node. See update() below if you want to update entire
 // subtrees.
 EventModel.prototype.localUpdate = function(pass) {
-  if (this.bindings) for (var id in this.bindings) {
-    var binding = this.bindings[id];
-    if (!binding.removed) binding.update(pass);
+  if (this.bindings) {
+    for (var id in this.bindings) {
+      var binding = this.bindings[id];
+      if (!binding.removed) binding.update(pass);
+    }
   }
 
   // If our value changed, we also need to update anything that depends on it
   // via refOut.
-  if (this.refOut) for (var id in this.refOut) {
-    var ref = this.refOut[id];
-    ref.update();
+  if (this.refOut) {
+    for (var id in this.refOut) {
+      var ref = this.refOut[id];
+      ref.update();
+    }
   }
 };
 
@@ -4987,8 +5276,10 @@ EventModel.prototype._updateArray = function(from, to) {
 };
 
 EventModel.prototype._updateObject = function() {
-  if (this.object) for (var key in this.object) {
-    this.object[key].update();
+  if (this.object) {
+    for (var key in this.object) {
+      this.object[key].update();
+    }
   }
 };
 
@@ -5023,9 +5314,11 @@ EventModel.prototype._insert = function(index, howMany) {
   }
 
   // Finally call our bindings.
-  if (this.bindings) for (var id in this.bindings) {
-    var binding = this.bindings[id];
-    binding.insert(index, howMany);
+  if (this.bindings) {
+    for (var id in this.bindings) {
+      var binding = this.bindings[id];
+      binding.insert(index, howMany);
+    }
   }
   this._updateObject();
 };
@@ -5043,9 +5336,11 @@ EventModel.prototype._remove = function(index, howMany) {
   }
 
   // Call bindings.
-  if (this.bindings) for (var id in this.bindings) {
-    var binding = this.bindings[id];
-    binding.remove(index, howMany);
+  if (this.bindings) {
+    for (var id in this.bindings) {
+      var binding = this.bindings[id];
+      binding.remove(index, howMany);
+    }
   }
   this._updateObject();
 };
@@ -5080,9 +5375,11 @@ EventModel.prototype._move = function(from, to, howMany) {
   }
 
   // Finally call our bindings.
-  if (this.bindings) for (var id in this.bindings) {
-    var binding = this.bindings[id];
-    binding.move(from, to, howMany);
+  if (this.bindings) {
+    for (var id in this.bindings) {
+      var binding = this.bindings[id];
+      binding.move(from, to, howMany);
+    }
   }
   this._updateObject();
 };
@@ -5135,7 +5432,7 @@ EventModel.prototype.move = function(segments, from, to, howMany) {
   });
 };
 
-},{"derby-templates":33}],28:[function(require,module,exports){
+},{"derby-templates":42}],28:[function(require,module,exports){
 exports.onStringInsert = onStringInsert;
 exports.onStringRemove = onStringRemove;
 exports.onTextInput = onTextInput;
@@ -5144,6 +5441,7 @@ function onStringInsert(el, previous, index, text) {
   function transformCursor(cursor) {
     return (index < cursor) ? cursor + text.length : cursor;
   }
+  previous || (previous = '');
   var newText = previous.slice(0, index) + text + previous.slice(index);
   replaceText(el, newText, transformCursor);
 }
@@ -5152,6 +5450,7 @@ function onStringRemove(el, previous, index, howMany) {
   function transformCursor(cursor) {
     return (index < cursor) ? cursor - Math.min(howMany, cursor - index) : cursor;
   }
+  previous || (previous = '');
   var newText = previous.slice(0, index) + previous.slice(index + howMany);
   replaceText(el, newText, transformCursor);
 }
@@ -5451,7 +5750,7 @@ function unexpected(node) {
   throw new Error('Unexpected Esprima node: ' + JSON.stringify(node, null, 2));
 }
 
-},{"derby-templates":33,"esprima-derby":32}],30:[function(require,module,exports){
+},{"derby-templates":32,"esprima-derby":39}],30:[function(require,module,exports){
 var htmlUtil = require('html-util');
 var derbyTemplates = require('derby-templates');
 var templates = derbyTemplates.templates;
@@ -5522,21 +5821,28 @@ function createStringTemplate(source, view) {
 }
 
 function parseHtmlStart(tag, tagName, attributes, selfClosing) {
+  var lowerTagName = tagName.toLowerCase();
   var hooks;
-  if (tagName !== 'view' && !viewForTagName(tagName)) {
+  if (lowerTagName !== 'view' && !viewForTagName(lowerTagName)) {
     hooks = hooksFromAttributes(attributes, 'Element');
   }
   var attributesMap = parseAttributes(attributes);
-  var namespaceUri = (tagName.toLowerCase() === 'svg') ?
+  var namespaceUri = (lowerTagName === 'svg') ?
     templates.NAMESPACE_URIS.svg : parseNode.namespaceUri;
-  if (selfClosing || templates.VOID_ELEMENTS[tagName]) {
-    var element = new templates.Element(tagName, attributesMap, null, hooks, selfClosing, null, namespaceUri);
+  var Constructor = templates.Element;
+  if (lowerTagName === 'tag') {
+    Constructor = templates.DynamicElement;
+    tagName = attributesMap.is;
+    delete attributesMap.is;
+  }
+  if (selfClosing || templates.VOID_ELEMENTS[lowerTagName]) {
+    var element = new Constructor(tagName, attributesMap, null, hooks, selfClosing, null, namespaceUri);
     parseNode.content.push(element);
-    parseElementClose(tagName);
+    parseElementClose(lowerTagName);
   } else {
     parseNode = parseNode.child();
     parseNode.namespaceUri = namespaceUri;
-    var element = new templates.Element(tagName, attributesMap, parseNode.content, hooks, selfClosing, null, namespaceUri);
+    var element = new Constructor(tagName, attributesMap, parseNode.content, hooks, selfClosing, null, namespaceUri);
     parseNode.parent.content.push(element);
   }
 }
@@ -5583,7 +5889,10 @@ function parseAttributes(attributes) {
 function parseHtmlEnd(tag, tagName) {
   parseNode = parseNode.parent;
   var last = parseNode.last();
-  if (!(last instanceof templates.Element && last.tagName === tagName)) {
+  if (!(
+    (last instanceof templates.DynamicElement && tagName.toLowerCase() === 'tag') ||
+    (last instanceof templates.Element && last.tagName === tagName)
+  )) {
     throw new Error('Mismatched closing HTML tag: ' + tag);
   }
   parseElementClose(tagName);
@@ -5750,9 +6059,9 @@ function parseNamedViewElement(element, view, name) {
 
 function finishParseViewElement(viewAttributes, remaining, viewInstance) {
   if (!viewAttributes.hasOwnProperty('content') && remaining.length) {
-    viewAttributes.content = new templates.ParentWrapper(
-      new templates.Template(remaining)
-    );
+    var template = new templates.Template(remaining);
+    viewAttributes.content = (viewAttributes.within) ? template :
+      new templates.ParentWrapper(template);
   }
   parseNode.content.push(viewInstance);
 }
@@ -5851,9 +6160,9 @@ function parseNameAttribute(element) {
 
 function parseAttributeElement(element, name, viewAttributes) {
   var camelName = dashToCamelCase(name);
-  viewAttributes[camelName] = new templates.ParentWrapper(
-    new templates.Template(element.content)
-  );
+  var content = new templates.Template(element.content);
+  viewAttributes[camelName] = (element.attributes && element.attributes.within) ?
+    content : new templates.ParentWrapper(content);
 }
 
 function parseArrayElement(element, name, viewAttributes) {
@@ -6002,7 +6311,7 @@ function matchBraces(text, num, i, openChar, closeChar) {
   return i;
 }
 
-var blockRegExp = /^(if|unless|else if|each|with)\s+([\s\S]+?)(?:\s+as\s+([^,\s]+)\s*(?:,\s*(\S+))?)?$/;
+var blockRegExp = /^(if|unless|else if|each|with|on)\s+([\s\S]+?)(?:\s+as\s+([^,\s]+)\s*(?:,\s*(\S+))?)?$/;
 var valueRegExp = /^(?:(view|unbound|bound|unescaped)\s+)?([\s\S]*)/;
 
 function createExpression(source) {
@@ -6011,8 +6320,8 @@ function createExpression(source) {
 
   // Parse block expression //
 
-  // The block expressions `if`, `unless`, `else if`, `each`, and `with` must
-  // have a single blockType keyword and a path. They may have an optional
+  // The block expressions `if`, `unless`, `else if`, `each`, `with`, and `on`
+  // must have a single blockType keyword and a path. They may have an optional
   // alias assignment
   var match = blockRegExp.exec(source);
   var path;
@@ -6079,7 +6388,7 @@ function appendErrorMessage(err, message) {
   return new Error(err + message);
 }
 
-},{"./createPathExpression":29,"./markup":31,"derby-templates":33,"html-util":40}],31:[function(require,module,exports){
+},{"./createPathExpression":29,"./markup":31,"derby-templates":32,"html-util":40}],31:[function(require,module,exports){
 var EventEmitter = require('events').EventEmitter;
 var templates = require('derby-templates').templates;
 var createPathExpression = require('./createPathExpression');
@@ -6134,7 +6443,2594 @@ function mergeInto(to, from) {
   return to;
 }
 
-},{"./createPathExpression":29,"derby-templates":33,"events":11}],32:[function(require,module,exports){
+},{"./createPathExpression":29,"derby-templates":32,"events":11}],32:[function(require,module,exports){
+exports.contexts = require('./lib/contexts');
+exports.expressions = require('./lib/expressions');
+exports.operatorFns = require('./lib/operatorFns');
+exports.templates = require('./lib/templates');
+
+},{"./lib/contexts":33,"./lib/expressions":34,"./lib/operatorFns":35,"./lib/templates":36}],33:[function(require,module,exports){
+exports.ContextMeta = ContextMeta;
+exports.Context = Context;
+
+function noop() {}
+
+// TODO:
+// Implement removeItemContext
+
+function ContextMeta() {
+  this.addBinding = noop;
+  this.removeBinding = noop;
+  this.removeNode = noop;
+  this.addItemContext = noop;
+  this.removeItemContext = noop;
+  this.views = null;
+  this.idNamespace = '';
+  this.idCount = 0;
+  this.pending = [];
+  this.pauseCount = 0;
+}
+
+function Context(meta, controller, parent, unbound, expression, item, view, attributes, hooks) {
+  // Required properties //
+
+  // Properties which are globally inherited for the entire page
+  this.meta = meta;
+  // The page or component. Must have a `model` property with a `data` property
+  this.controller = controller;
+
+  // Optional properties //
+
+  // Containing context
+  this.parent = parent;
+  // Boolean set to true when bindings should be ignored
+  this.unbound = unbound;
+  // The expression for a block
+  this.expression = expression;
+  // Alias name for the given expression
+  this.alias = expression && expression.meta.as;
+  // Alias name for the index or iterated key
+  this.keyAlias = expression && expression.meta.keyAs;
+
+  // For Context::eachChild
+  // The index of the each at render time
+  this.item = item;
+
+  // For Context::viewChild
+  // Reference to the current view
+  this.view = view;
+  // Attribute values passed to the view instance
+  this.attributes = attributes;
+  // MarkupHooks to be called on create of a component
+  this.hooks = hooks;
+
+  // Used in EventModel
+  this._id = null;
+}
+
+Context.prototype.id = function() {
+  var count = ++this.meta.idCount;
+  return this.meta.idNamespace + '_' + count.toString(36);
+};
+
+Context.prototype.addBinding = function(binding) {
+  var expression = binding.template.expression;
+  if (expression ? expression.isUnbound(this) : this.unbound) return;
+  this.meta.addBinding(binding);
+};
+Context.prototype.removeBinding = function(binding) {
+  this.meta.removeBinding(binding);
+};
+Context.prototype.removeNode = function(node) {
+  this.meta.removeNode(node);
+};
+
+Context.prototype.child = function(expression) {
+  // Set or inherit the binding mode
+  var blockType = expression.meta.blockType;
+  var unbound = (blockType === 'unbound') ? true :
+    (blockType === 'bound') ? false :
+    this.unbound;
+  return new Context(this.meta, this.controller, this, unbound, expression);
+};
+
+Context.prototype.componentChild = function(component) {
+  return new Context(this.meta, component, this, this.unbound);
+};
+
+// Make a context for an item in an each block
+Context.prototype.eachChild = function(index) {
+  var context = new Context(this.meta, this.controller, this, this.unbound, this.expression, index);
+  this.meta.addItemContext(context);
+  return context;
+};
+
+Context.prototype.viewChild = function(view, attributes, hooks) {
+  return new Context(this.meta, this.controller, this, this.unbound, null, null, view, attributes, hooks);
+};
+
+Context.prototype.forRelative = function(expression) {
+  return (expression.meta && expression.meta.blockType) ? this.parent : this;
+};
+
+// Returns the closest context which defined the named alias
+Context.prototype.forAlias = function(alias) {
+  var context = this;
+  while (context) {
+    if (context.alias === alias || context.keyAlias === alias) return context;
+    context = context.parent;
+  }
+};
+
+// Returns the closest containing context for a view attribute name or nothing
+Context.prototype.forAttribute = function(attribute) {
+  var context = this;
+  while (context) {
+    // Find the closest context associated with a view
+    if (context.view) {
+      var attributes = context.attributes;
+      if (!attributes) return;
+      if (attributes.hasOwnProperty(attribute)) return context;
+      // If the attribute isn't found, but the attributes inherit, continue
+      // looking in the next closest view context
+      if (!attributes.inherit && !attributes.extend) return;
+    }
+    context = context.parent;
+  }
+};
+
+Context.prototype.forViewParent = function() {
+  var context = this;
+  while (context) {
+    // Find the closest view
+    if (context.view) return context.parent;
+    context = context.parent;
+  }
+};
+
+Context.prototype.getView = function() {
+  var context = this;
+  while (context) {
+    // Find the closest view
+    if (context.view) return context.view;
+    context = context.parent;
+  }
+};
+
+// Returns the `this` value for a context
+Context.prototype.get = function() {
+  return (this.expression) ? this.expression.get(this) : this.controller.model.data;
+};
+
+Context.prototype.pause = function() {
+  this.meta.pauseCount++;
+};
+
+Context.prototype.unpause = function() {
+  if (--this.meta.pauseCount) return;
+  this.flush();
+};
+
+Context.prototype.flush = function() {
+  var pending = this.meta.pending;
+  var len = pending.length;
+  if (!len) return;
+  this.meta.pending = [];
+  for (var i = 0; i < len; i++) {
+    pending[i].run();
+  }
+};
+
+Context.prototype.queueCreate = function(object) {
+  this.meta.pending.push(new PendingCreate(object, this));
+};
+
+function PendingCreate(object, context) {
+  this.object = object;
+  this.context = context;
+}
+PendingCreate.prototype.run = function() {
+  this.object.create(this.context);
+};
+
+},{}],34:[function(require,module,exports){
+(function (global){
+var serializeObject = require('serialize-object');
+var operatorFns = require('./operatorFns');
+var templates = require('./templates');
+
+exports.lookup = lookup;
+exports.templateTruthy = templateTruthy;
+exports.pathSegments = pathSegments;
+exports.renderValue = renderValue;
+exports.ExpressionMeta = ExpressionMeta;
+
+exports.Expression = Expression;
+exports.LiteralExpression = LiteralExpression;
+exports.PathExpression = PathExpression;
+exports.RelativePathExpression = RelativePathExpression;
+exports.AliasPathExpression = AliasPathExpression;
+exports.AttributePathExpression = AttributePathExpression;
+exports.BracketsExpression = BracketsExpression;
+exports.FnExpression = FnExpression;
+exports.OperatorExpression = OperatorExpression;
+exports.NewExpression = NewExpression;
+exports.SequenceExpression = SequenceExpression;
+
+function lookup(segments, value) {
+  if (!segments) return value;
+
+  for (var i = 0, len = segments.length; i < len; i++) {
+    if (value == null) return value;
+    value = value[segments[i]];
+  }
+  return value;
+}
+
+// Unlike JS, `[]` is falsey. Otherwise, truthiness is the same as JS
+function templateTruthy(value) {
+  return (Array.isArray(value)) ? value.length > 0 : !!value;
+}
+
+function pathSegments(segments) {
+  var result = [];
+  for (var i = 0; i < segments.length; i++) {
+    var segment = segments[i];
+    result[i] = (typeof segment === 'object') ? segment.item : segment;
+  }
+  return result;
+}
+
+function renderValue(value, context) {
+  return (typeof value !== 'object') ? value :
+    (value instanceof templates.Template) ? renderTemplate(value, context) :
+    (Array.isArray(value)) ? renderArray(value, context) :
+    renderObject(value, context);
+}
+function renderTemplate(value, context) {
+  var i = 1000;
+  while (value instanceof templates.Template) {
+    if (!i--) throw new Error('Maximum template render passes exceeded');
+    value = value.get(context, true);
+  }
+  return value;
+}
+function renderArray(array, context) {
+  for (var i = 0, len = array.length; i < len; i++) {
+    if (hasTemplateProperty(array[i])) {
+      return renderArrayProperties(array, context);
+    }
+  }
+  return array;
+}
+function renderObject(object, context) {
+  return (hasTemplateProperty(object)) ?
+    renderObjectProperties(object, context) : object;
+}
+function hasTemplateProperty(object) {
+  if (typeof object !== 'object') return false;
+  if (global.Node && object instanceof global.Node) return false;
+  for (var key in object) {
+    if (object[key] instanceof templates.Template) return true;
+  }
+  return false;
+}
+function renderArrayProperties(array, context) {
+  var out = [];
+  for (var i = 0, len = array.length; i < len; i++) {
+    var item = renderObject(array[i], context);
+    out.push(item);
+  }
+  return out;
+}
+function renderObjectProperties(object, context) {
+  var out = {};
+  for (var key in object) {
+    var value = object[key];
+    out[key] = renderTemplate(value, context);
+  }
+  return out;
+}
+
+function ExpressionMeta(source, blockType, isEnd, as, keyAs, unescaped, bindType, valueType) {
+  this.source = source;
+  this.blockType = blockType;
+  this.isEnd = isEnd;
+  this.as = as;
+  this.keyAs = keyAs;
+  this.unescaped = unescaped;
+  this.bindType = bindType;
+  this.valueType = valueType;
+}
+ExpressionMeta.prototype.module = 'expressions';
+ExpressionMeta.prototype.type = 'ExpressionMeta';
+ExpressionMeta.prototype.serialize = function() {
+  return serializeObject.instance(
+    this
+  , this.source
+  , this.blockType
+  , this.isEnd
+  , this.as
+  , this.keyAs
+  , this.unescaped
+  , this.bindType
+  , this.valueType
+  );
+};
+
+function Expression(meta) {
+  this.meta = meta;
+}
+Expression.prototype.module = 'expressions';
+Expression.prototype.type = 'Expression';
+Expression.prototype.serialize = function() {
+  return serializeObject.instance(this, this.meta);
+};
+Expression.prototype.toString = function() {
+  return this.meta && this.meta.source;
+};
+Expression.prototype.truthy = function(context) {
+  var blockType = this.meta.blockType;
+  if (blockType === 'else') return true;
+  var value = this.get(context, true);
+  var truthy = templateTruthy(value);
+  return (blockType === 'unless') ? !truthy : truthy;
+};
+Expression.prototype.get = function() {};
+// Return the expression's segment list with context objects
+Expression.prototype.resolve = function() {};
+// Return a list of segment lists or null
+Expression.prototype.dependencies = function() {};
+// Return the pathSegments that the expression currently resolves to or null
+Expression.prototype.pathSegments = function(context) {
+  var segments = this.resolve(context);
+  return segments && pathSegments(segments);
+};
+Expression.prototype.set = function(context, value) {
+  var segments = this.pathSegments(context);
+  if (!segments) throw new Error('Expression does not support setting');
+  context.controller.model._set(segments, value);
+};
+Expression.prototype._getPatch = function(context, value) {
+  if (this.meta && this.meta.blockType && value instanceof templates.Template) {
+    value = value.get(context, true);
+  }
+  return (context && context.expression === this && context.item != null) ?
+    value && value[context.item] : value;
+};
+Expression.prototype._resolvePatch = function(context, segments) {
+  return (context && context.expression === this && context.item != null) ?
+    segments.concat(context) : segments;
+};
+Expression.prototype.isUnbound = function(context) {
+  // If the template being rendered has an explicit bindType keyword, such as:
+  // {{unbound #item.text}}
+  var bindType = this.meta && this.meta.bindType;
+  if (bindType === 'unbound') return true;
+  if (bindType === 'bound') return false;
+  // Otherwise, inherit from the context
+  return context.unbound;
+};
+
+
+function LiteralExpression(value, meta) {
+  this.value = value;
+  this.meta = meta;
+}
+LiteralExpression.prototype = new Expression();
+LiteralExpression.prototype.type = 'LiteralExpression';
+LiteralExpression.prototype.serialize = function() {
+  return serializeObject.instance(this, this.value, this.meta);
+};
+LiteralExpression.prototype.get = function(context) {
+  return this._getPatch(context, this.value);
+};
+
+function PathExpression(segments, meta) {
+  this.segments = segments;
+  this.meta = meta;
+}
+PathExpression.prototype = new Expression();
+PathExpression.prototype.type = 'PathExpression';
+PathExpression.prototype.serialize = function() {
+  return serializeObject.instance(this, this.segments, this.meta);
+};
+PathExpression.prototype.get = function(context) {
+  var value = lookup(this.segments, context.controller.model.data);
+  return this._getPatch(context, value);
+};
+PathExpression.prototype.resolve = function(context) {
+  var segments = concat(context.controller._scope, this.segments);
+  return this._resolvePatch(context, segments);
+};
+PathExpression.prototype.dependencies = function(context, forInnerPath) {
+  return outerDependency(this, context, forInnerPath);
+};
+
+function RelativePathExpression(segments, meta) {
+  this.segments = segments;
+  this.meta = meta;
+}
+RelativePathExpression.prototype = new Expression();
+RelativePathExpression.prototype.type = 'RelativePathExpression';
+RelativePathExpression.prototype.serialize = function() {
+  return serializeObject.instance(this, this.segments, this.meta);
+};
+RelativePathExpression.prototype.get = function(context) {
+  var relativeContext = context.forRelative(this);
+  var value = relativeContext.get();
+  if (this.segments.length) {
+    if (value instanceof templates.Template) value = value.get(relativeContext, true);
+    value = lookup(this.segments, value);
+  }
+  return this._getPatch(context, value);
+};
+RelativePathExpression.prototype.resolve = function(context) {
+  var relativeContext = context.forRelative(this);
+  var base = (relativeContext.expression) ?
+    relativeContext.expression.resolve(relativeContext) :
+    [];
+  if (!base) return;
+  var segments = base.concat(this.segments);
+  return this._resolvePatch(relativeContext, segments);
+};
+RelativePathExpression.prototype.dependencies = function(context, forInnerPath) {
+  // Return inner dependencies from our ancestor
+  // (e.g., {{ with foo[bar] }} ... {{ this.x }} has 'bar' as a dependency.)
+  var relativeContext = context.forRelative(this);
+  var inner = relativeContext.expression &&
+    relativeContext.expression.dependencies(relativeContext, true);
+  var outer = outerDependency(this, context, forInnerPath);
+  return concat(outer, inner);
+};
+
+function AliasPathExpression(alias, segments, meta) {
+  this.alias = alias;
+  this.segments = segments;
+  this.meta = meta;
+}
+AliasPathExpression.prototype = new Expression();
+AliasPathExpression.prototype.type = 'AliasPathExpression';
+AliasPathExpression.prototype.serialize = function() {
+  return serializeObject.instance(this, this.alias, this.segments, this.meta);
+};
+AliasPathExpression.prototype.get = function(context) {
+  var aliasContext = context.forAlias(this.alias);
+  if (!aliasContext) return;
+  if (aliasContext.keyAlias === this.alias) {
+    return aliasContext.item;
+  }
+  var value = aliasContext.get();
+  if (this.segments.length) {
+    if (value instanceof templates.Template) value = value.get(aliasContext, true);
+    value = lookup(this.segments, value);
+  }
+  return this._getPatch(context, value);
+};
+AliasPathExpression.prototype.resolve = function(context) {
+  var aliasContext = context.forAlias(this.alias);
+  if (!aliasContext) return;
+  if (aliasContext.keyAlias === this.alias) return;
+  var base = aliasContext.expression.resolve(aliasContext);
+  if (!base) return;
+  var segments = base.concat(this.segments);
+  return this._resolvePatch(context, segments);
+};
+AliasPathExpression.prototype.dependencies = function(context, forInnerPath) {
+  var aliasContext = context.forAlias(this.alias);
+  if (!aliasContext) return;
+  var inner = aliasContext.expression.dependencies(aliasContext, true);
+  var outer = (aliasContext.keyAlias === this.alias) ?
+    // For keyAliases, use a dependency of the entire list, so that it will
+    // always update when the list changes in any way. This is over-binding,
+    // but this would otherwise need complex special casing
+    outerDependency(aliasContext.parent.expression, aliasContext.parent, forInnerPath) :
+    outerDependency(this, context, forInnerPath);
+  return concat(outer, inner);
+};
+
+function AttributePathExpression(attribute, segments, meta) {
+  this.attribute = attribute;
+  this.segments = segments;
+  this.meta = meta;
+}
+AttributePathExpression.prototype = new Expression();
+AttributePathExpression.prototype.type = 'AttributePathExpression';
+AttributePathExpression.prototype.serialize = function() {
+  return serializeObject.instance(this, this.attribute, this.segments, this.meta);
+};
+AttributePathExpression.prototype.get = function(context) {
+  var attributeContext = context.forAttribute(this.attribute);
+  if (!attributeContext) return;
+  var value = attributeContext.attributes[this.attribute];
+  if (this.segments.length) {
+    if (value instanceof templates.Template) value = value.get(attributeContext, true);
+    value = lookup(this.segments, value);
+  }
+  return this._getPatch(context, value);
+};
+AttributePathExpression.prototype.resolve = function(context) {
+  var attributeContext = context.forAttribute(this.attribute);
+  // Attributes are either a ParentWrapper or a literal value
+  var value = attributeContext && attributeContext.attributes[this.attribute];
+  var base = value && (typeof value.resolve === 'function') &&
+    value.resolve(attributeContext);
+  if (!base) return;
+  var segments = base.concat(this.segments);
+  return this._resolvePatch(context, segments);
+};
+AttributePathExpression.prototype.dependencies = function(context, forInnerPath) {
+  var attributeContext = context.forAttribute(this.attribute);
+  // Attributes are either a ParentWrapper or a literal value
+  var value = attributeContext && attributeContext.attributes[this.attribute];
+  var inner = value && (typeof value.dependencies === 'function') &&
+    value.dependencies(attributeContext, true);
+  var outer = outerDependency(this, context, forInnerPath);
+  return concat(outer, inner);
+};
+
+function BracketsExpression(before, inside, afterSegments, meta) {
+  this.before = before;
+  this.inside = inside;
+  this.afterSegments = afterSegments;
+  this.meta = meta;
+}
+BracketsExpression.prototype = new Expression();
+BracketsExpression.prototype.type = 'BracketsExpression';
+BracketsExpression.prototype.serialize = function() {
+  return serializeObject.instance(this, this.before, this.inside, this.afterSegments, this.meta);
+};
+BracketsExpression.prototype.get = function(context) {
+  var inside = this.inside.get(context);
+  if (inside == null) return;
+  var before = this.before.get(context);
+  if (!before) return;
+  var base = before[inside];
+  var value = (this.afterSegments) ? lookup(this.afterSegments, base) : base;
+  return this._getPatch(context, value);
+};
+BracketsExpression.prototype.resolve = function(context) {
+  // Get and split the current value of the expression inside the brackets
+  var inside = this.inside.get(context);
+  if (inside == null) return;
+
+  // Concat the before, inside, and optional after segments
+  var base = this.before.resolve(context);
+  if (!base) return;
+  var segments = (this.afterSegments) ?
+    base.concat(inside, this.afterSegments) :
+    base.concat(inside);
+  return this._resolvePatch(context, segments);
+};
+BracketsExpression.prototype.dependencies = function(context, forInnerPath) {
+  var before = this.before.dependencies(context, true);
+  var inner = this.inside.dependencies(context);
+  var outer = outerDependency(this, context, forInnerPath);
+  return concat(concat(outer, inner), before);
+};
+
+function FnExpression(segments, args, afterSegments, meta) {
+  this.segments = segments;
+  this.args = args;
+  this.afterSegments = afterSegments;
+  this.meta = meta;
+  var parentSegments = segments && segments.slice();
+  this.lastSegment = parentSegments && parentSegments.pop();
+  this.parentSegments = (parentSegments && parentSegments.length) ? parentSegments : null;
+}
+FnExpression.prototype = new Expression();
+FnExpression.prototype.type = 'FnExpression';
+FnExpression.prototype.serialize = function() {
+  return serializeObject.instance(this, this.segments, this.args, this.afterSegments, this.meta);
+};
+FnExpression.prototype.get = function(context) {
+  var value = this.apply(context);
+  // Lookup property underneath computed value if needed
+  if (this.afterSegments) {
+    value = lookup(this.afterSegments, value);
+  }
+  return this._getPatch(context, value);
+};
+FnExpression.prototype.apply = function(context, extraInputs) {
+  var controller = context.controller;
+  var fn, parent;
+  while (controller) {
+    parent = (this.parentSegments) ?
+      lookup(this.parentSegments, controller) :
+      controller;
+    fn = parent && parent[this.lastSegment];
+    if (fn) break;
+    controller = controller.parent;
+  }
+  if (!fn) throw new Error('Function not found for: ' + this.segments.join('.'));
+  var getFn = fn.get || fn;
+  var out = this._applyFn(getFn, context, extraInputs, parent);
+  return out;
+};
+FnExpression.prototype._getInputs = function(context) {
+  var inputs = [];
+  for (var i = 0, len = this.args.length; i < len; i++) {
+    var value = this.args[i].get(context);
+    inputs.push(renderValue(value, context));
+  }
+  return inputs;
+};
+FnExpression.prototype._applyFn = function(fn, context, extraInputs, thisArg) {
+  // Apply if there are no path inputs
+  if (!this.args) {
+    return (extraInputs) ?
+      fn.apply(thisArg, extraInputs) :
+      fn.call(thisArg);
+  }
+  // Otherwise, get the current value for path inputs and apply
+  var inputs = this._getInputs(context);
+  if (extraInputs) {
+    for (var i = 0, len = extraInputs.length; i < len; i++) {
+      inputs.push(extraInputs[i]);
+    }
+  }
+  return fn.apply(thisArg, inputs);
+};
+FnExpression.prototype.dependencies = function(context) {
+  var dependencies = [];
+  if (!this.args) return dependencies;
+  for (var i = 0, len = this.args.length; i < len; i++) {
+    var argDependencies = this.args[i].dependencies(context);
+    var firstDependency = argDependencies && argDependencies[0];
+    if (!firstDependency) continue;
+    if (firstDependency[firstDependency.length - 1] !== '*') {
+      argDependencies[0] = argDependencies[0].concat('*');
+    }
+    for (var j = 0, jLen = argDependencies.length; j < jLen; j++) {
+      dependencies.push(argDependencies[j]);
+    }
+  }
+  return dependencies;
+};
+FnExpression.prototype.set = function(context, value) {
+  var controller = context.controller;
+  var fn, parent;
+  while (controller) {
+    parent = (this.parentSegments) ?
+      lookup(this.parentSegments, controller) :
+      controller;
+    fn = parent && parent[this.lastSegment];
+    if (fn) break;
+    controller = controller.parent;
+  }
+  var setFn = fn && fn.set;
+  if (!setFn) throw new Error('No setter function for: ' + this.segments.join('.'));
+  var inputs = this._getInputs(context);
+  inputs.unshift(value);
+  var out = setFn.apply(parent, inputs);
+  for (var i in out) {
+    this.args[i].set(context, out[i]);
+  }
+};
+
+function NewExpression(segments, args, afterSegments, meta) {
+  FnExpression.call(this, segments, args, afterSegments, meta);
+}
+NewExpression.prototype = new FnExpression();
+NewExpression.prototype.type = 'NewExpression';
+NewExpression.prototype._applyFn = function(Fn, context) {
+  // Apply if there are no path inputs
+  if (!this.args) return new Fn();
+  // Otherwise, get the current value for path inputs and apply
+  var inputs = this._getInputs(context);
+  inputs.unshift(null);
+  return new (Fn.bind.apply(Fn, inputs))();
+};
+
+function OperatorExpression(name, args, afterSegments, meta) {
+  this.name = name;
+  this.args = args;
+  this.afterSegments = afterSegments;
+  this.meta = meta;
+  this.getFn = operatorFns.get[name];
+  this.setFn = operatorFns.set[name];
+}
+OperatorExpression.prototype = new FnExpression();
+OperatorExpression.prototype.type = 'OperatorExpression';
+OperatorExpression.prototype.serialize = function() {
+  return serializeObject.instance(this, this.name, this.args, this.afterSegments, this.meta);
+};
+OperatorExpression.prototype.apply = function(context) {
+  var inputs = this._getInputs(context);
+  return this.getFn.apply(null, inputs);
+};
+OperatorExpression.prototype.set = function(context, value) {
+  var inputs = this._getInputs(context);
+  inputs.unshift(value);
+  var out = this.setFn.apply(null, inputs);
+  for (var i in out) {
+    this.args[i].set(context, out[i]);
+  }
+};
+
+function SequenceExpression(args, afterSegments, meta) {
+  this.args = args;
+  this.afterSegments = afterSegments;
+  this.meta = meta;
+}
+SequenceExpression.prototype = new OperatorExpression();
+SequenceExpression.prototype.type = 'SequenceExpression';
+SequenceExpression.prototype.serialize = function() {
+  return serializeObject.instance(this, this.args, this.afterSegments, this.meta);
+};
+SequenceExpression.prototype.name = ',';
+SequenceExpression.prototype.getFn = operatorFns.get[','];
+SequenceExpression.prototype.resolve = function(context) {
+  var last = this.args[this.args.length - 1];
+  return last.resolve(context);
+};
+SequenceExpression.prototype.dependencies = function(context, forInnerPath) {
+  var last = this.args[this.args.length - 1];
+  return last.dependencies(context, forInnerPath);
+};
+
+function outerDependency(expression, context, forInnerPath) {
+  if (forInnerPath) return;
+  return [expression.resolve(context)];
+}
+
+function concat(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return a.concat(b);
+}
+
+}).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"./operatorFns":35,"./templates":36,"serialize-object":38}],35:[function(require,module,exports){
+// `-` and `+` can be either unary or binary, so all unary operators are
+// postfixed with `U` to differentiate
+
+exports.get = {
+  // Unary operators
+  '!U': function(value) {
+    return !value;
+  }
+, '-U': function(value) {
+    return -value;
+  }
+, '+U': function(value) {
+    return +value;
+  }
+, '~U': function(value) {
+    return ~value;
+  }
+, 'typeofU': function(value) {
+    return typeof value;
+  }
+  // Binary operators
+, '||': function(left, right) {
+    return left || right;
+  }
+, '&&': function(left, right) {
+    return left && right;
+  }
+, '|': function(left, right) {
+    return left | right;
+  }
+, '^': function(left, right) {
+    return left ^ right;
+  }
+, '&': function(left, right) {
+    return left & right;
+  }
+, '==': function(left, right) {
+    return left == right; // jshint ignore:line
+  }
+, '!=': function(left, right) {
+    return left != right; // jshint ignore:line
+  }
+, '===': function(left, right) {
+    return left === right;
+  }
+, '!==': function(left, right) {
+    return left !== right;
+  }
+, '<': function(left, right) {
+    return left < right;
+  }
+, '>': function(left, right) {
+    return left > right;
+  }
+, '<=': function(left, right) {
+    return left <= right;
+  }
+, '>=': function(left, right) {
+    return left >= right;
+  }
+, 'instanceof': function(left, right) {
+    return left instanceof right;
+  }
+, 'in': function(left, right) {
+    return left in right;
+  }
+, '<<': function(left, right) {
+    return left << right;
+  }
+, '>>': function(left, right) {
+    return left >> right;
+  }
+, '>>>': function(left, right) {
+    return left >>> right;
+  }
+, '+': function(left, right) {
+    return left + right;
+  }
+, '-': function(left, right) {
+    return left - right;
+  }
+, '*': function(left, right) {
+    return left * right;
+  }
+, '/': function(left, right) {
+    return left / right;
+  }
+, '%': function(left, right) {
+    return left % right;
+  }
+  // Conditional operator
+, '?': function(test, consequent, alternate) {
+    return (test) ? consequent : alternate;
+  }
+, // Sequence
+  ',': function() {
+    return arguments[arguments.length - 1];
+  }
+  // Array literal
+, '[]': function() {
+    return Array.prototype.slice.call(arguments);
+  }
+  // Object literal
+, '{}': function() {
+    var value = {};
+    for (var i = 0, len = arguments.length; i < len; i += 2) {
+      var key = arguments[i];
+      value[key] = arguments[i + 1];
+    }
+    return value;
+  }
+};
+
+exports.set = {
+  // Unary operators
+  '!U': function(value) {
+    return [!value];
+  }
+, '-U': function(value) {
+    return [-value];
+  }
+  // Binary operators
+, '==': function(value, left, right) {
+    if (value) return [right];
+  }
+, '===': function(value, left, right) {
+    if (value) return [right];
+  }
+, 'in': function(value, left, right) {
+    right[left] = true;
+    return {1: right};
+  }
+, '+': function(value, left, right) {
+    return [value - right];
+  }
+, '-': function(value, left, right) {
+    return [value + right];
+  }
+, '*': function(value, left, right) {
+    return [value / right];
+  }
+, '/': function(value, left, right) {
+    return [value * right];
+  }
+};
+
+},{}],36:[function(require,module,exports){
+var saddle = require('saddle');
+var serializeObject = require('serialize-object');
+
+(function() {
+  for (var key in saddle) {
+    exports[key] = saddle[key];
+  }
+})();
+
+exports.View = View;
+exports.ViewInstance = ViewInstance;
+exports.DynamicViewInstance = DynamicViewInstance;
+exports.ParentWrapper = ParentWrapper;
+
+exports.Views = Views;
+
+exports.MarkupHook = MarkupHook;
+exports.ElementOn = ElementOn;
+exports.ComponentOn = ComponentOn;
+exports.ComponentMarker = ComponentMarker;
+exports.MarkupAs = MarkupAs;
+
+exports.emptyTemplate = new saddle.Template([]);
+
+// Add ::isUnbound to Template && Binding
+saddle.Template.prototype.isUnbound = function(context) {
+  return context.unbound;
+};
+saddle.Binding.prototype.isUnbound = function() {
+  return this.template.expression.isUnbound(this.context);
+};
+
+// Add Template::resolve
+saddle.Template.prototype.resolve = function() {};
+
+// The Template::dependencies method is specific to how Derby bindings work,
+// so extend all of the Saddle Template types here
+saddle.Template.prototype.dependencies = function(context) {
+  return getArrayDependencies(this.content, context);
+};
+saddle.Doctype.prototype.dependencies = function() {};
+saddle.Text.prototype.dependencies = function() {};
+saddle.DynamicText.prototype.dependencies = function(context) {
+  return getDependencies(this.expression, context);
+};
+saddle.Comment.prototype.dependencies = function() {};
+saddle.DynamicComment.prototype.dependencies = function(context) {
+  return getDependencies(this.expression, context);
+};
+saddle.Element.prototype.dependencies = function(context) {
+  var items = getMapDependencies(this.attributes, context);
+  return getArrayDependencies(this.content, context, items);
+};
+saddle.Block.prototype.dependencies = function(context) {
+  var items = getDependencies(this.expression, context);
+  return getArrayDependencies(this.content, context, items);
+};
+saddle.ConditionalBlock.prototype.dependencies = function(context) {
+  var items = getArrayDependencies(this.expressions, context);
+  return getArrayOfArrayDependencies(this.contents, context, items);
+};
+saddle.EachBlock.prototype.dependencies = function(context) {
+  var items = getDependencies(this.expression, context);
+  items = getArrayDependencies(this.content, context, items);
+  return getArrayDependencies(this.elseContent, context, items);
+};
+saddle.Attribute.prototype.dependencies = function() {};
+saddle.DynamicAttribute.prototype.dependencies = function(context) {
+  return getDependencies(this.expression, context);
+};
+
+function getArrayOfArrayDependencies(expressions, context, items) {
+  if (!expressions) return items;
+  for (var i = 0, len = expressions.length; i < len; i++) {
+    items = getArrayDependencies(expressions[i], context, items);
+  }
+  return items;
+}
+function getArrayDependencies(expressions, context, items) {
+  if (!expressions) return items;
+  for (var i = 0, len = expressions.length; i < len; i++) {
+    items = getDependencies(expressions[i], context, items);
+  }
+  return items;
+}
+function getMapDependencies(expressions, context, items) {
+  if (!expressions) return items;
+  for (var key in expressions) {
+    items = getDependencies(expressions[key], context, items);
+  }
+  return items;
+}
+function getDependencies(expression, context, items) {
+  var dependencies = expression && expression.dependencies(context);
+  if (!dependencies) return items;
+  for (var i = 0, len = dependencies.length; i < len; i++) {
+    items || (items = []);
+    items.push(dependencies[i]);
+  }
+  return items;
+}
+
+function ViewAttributesMap(source) {
+  var items = source.split(/\s+/);
+  for (var i = 0, len = items.length; i < len; i++) {
+    this[items[i]] = true;
+  }
+}
+function ViewArraysMap(source) {
+  var items = source.split(/\s+/);
+  for (var i = 0, len = items.length; i < len; i++) {
+    var item = items[i].split('/');
+    this[item[0]] = item[1] || item[0];
+  }
+}
+function View(views, name, source, options) {
+  this.views = views;
+  this.name = name;
+  this.source = source;
+  this.options = options;
+
+  var nameSegments = (this.name || '').split(':');
+  var lastSegment = nameSegments.pop();
+  this.namespace = nameSegments.join(':');
+  this.registeredName = (lastSegment === 'index') ? this.namespace : this.name;
+
+  this.attributesMap = options && options.attributes &&
+    new ViewAttributesMap(options.attributes);
+  this.arraysMap = options && options.arrays &&
+    new ViewArraysMap(options.arrays);
+  // The empty string is considered true for easier HTML attribute parsing
+  this.unminified = options && (options.unminified || options.unminified === '');
+  this.string = options && (options.string || options.string === '');
+  this.template = null;
+  this.componentFactory = null;
+}
+View.prototype = new saddle.Template();
+View.prototype.type = 'View';
+View.prototype.serialize = function(options) {
+  if (options && !options.server && this.options && this.options.serverOnly) return '';
+  var template = this.template || this.parse();
+  return 'views.register(' + serializeObject.args([
+      this.name
+    , (options && options.minify) ? null : this.source
+    , (hasKeys(this.options)) ? this.options : null
+    ]) + ').template = ' + template.serialize() + ';';
+};
+View.prototype._isComponent = function(context) {
+  return this.componentFactory &&
+    context.attributes && !context.attributes.extend;
+};
+View.prototype._initComponent = function(context) {
+  return (this._isComponent(context)) ?
+    this.componentFactory.init(context) : context;
+};
+View.prototype._queueCreate = function(context, viewContext) {
+  if (this._isComponent(context)) {
+    viewContext.queueCreate(this.componentFactory);
+  }
+};
+View.prototype.get = function(context, unescaped) {
+  var viewContext = this._initComponent(context);
+  var template = this.template || this.parse();
+  return template.get(viewContext, unescaped);
+};
+View.prototype.getFragment = function(context, binding) {
+  var viewContext = this._initComponent(context);
+  var template = this.template || this.parse();
+  var fragment = template.getFragment(viewContext, binding);
+  this._queueCreate(context, viewContext);
+  return fragment;
+};
+View.prototype.appendTo = function(parent, context) {
+  var viewContext = this._initComponent(context);
+  var template = this.template || this.parse();
+  template.appendTo(parent, viewContext);
+  this._queueCreate(context, viewContext);
+};
+View.prototype.attachTo = function(parent, node, context) {
+  var viewContext = this._initComponent(context);
+  var template = this.template || this.parse();
+  var node = template.attachTo(parent, node, viewContext);
+  this._queueCreate(context, viewContext);
+  return node;
+};
+View.prototype.dependencies = function(context) {
+  var template = this.template || this.parse();
+  return template.dependencies(context);
+};
+View.prototype.parse = function() {
+  this._parse();
+  if (this.componentFactory) {
+    var hooks = [new ComponentMarker()];
+    var marker = new saddle.Comment(this.name, hooks);
+    this.template.content.unshift(marker);
+  }
+  return this.template;
+};
+// View.prototype._parse is defined in parsing.js, so that it doesn't have to
+// be included in the client if templates are all parsed server-side
+View.prototype._parse = function() {
+  throw new Error('View parsing not available');
+};
+
+function ViewInstance(name, attributes, hooks) {
+  this.name = name;
+  this.attributes = attributes;
+  this.hooks = hooks;
+  this.view = null;
+}
+ViewInstance.prototype = new saddle.Template();
+ViewInstance.prototype.type = 'ViewInstance';
+ViewInstance.prototype.serialize = function() {
+  return serializeObject.instance(this, this.name, this.attributes, this.hooks);
+};
+ViewInstance.prototype.get = function(context, unescaped) {
+  var view = this._find(context);
+  var viewContext = context.viewChild(view, this.attributes, this.hooks);
+  return view.get(viewContext, unescaped);
+};
+ViewInstance.prototype.getFragment = function(context, binding) {
+  var view = this._find(context);
+  var viewContext = context.viewChild(view, this.attributes, this.hooks);
+  return view.getFragment(viewContext, binding);
+};
+ViewInstance.prototype.appendTo = function(parent, context) {
+  var view = this._find(context);
+  var viewContext = context.viewChild(view, this.attributes, this.hooks);
+  view.appendTo(parent, viewContext);
+};
+ViewInstance.prototype.attachTo = function(parent, node, context) {
+  var view = this._find(context);
+  var viewContext = context.viewChild(view, this.attributes, this.hooks);
+  return view.attachTo(parent, node, viewContext);
+};
+ViewInstance.prototype.dependencies = function(context) {
+  var view = this._find(context);
+  var viewContext = context.viewChild(view, this.attributes, this.hooks);
+  return view.dependencies(viewContext);
+};
+ViewInstance.prototype._find = function(context) {
+  if (this.view) return this.view;
+  var contextView = context.getView();
+  var namespace = contextView && contextView.namespace;
+  this.view = context.meta.views.find(this.name, namespace);
+  if (!this.view) {
+    var message = context.meta.views.findErrorMessage(this.name, contextView);
+    throw new Error(message);
+  }
+  return this.view;
+};
+
+function DynamicViewInstance(nameExpression, attributes, hooks) {
+  this.nameExpression = nameExpression;
+  this.attributes = attributes;
+  this.hooks = hooks;
+  this.optional = attributes && attributes.optional;
+}
+DynamicViewInstance.prototype = new ViewInstance();
+DynamicViewInstance.prototype.type = 'DynamicViewInstance';
+DynamicViewInstance.prototype.serialize = function() {
+  return serializeObject.instance(this, this.nameExpression, this.attributes, this.hooks);
+};
+DynamicViewInstance.prototype._find = function(context) {
+  var name = this.nameExpression.get(context);
+  var contextView = context.getView();
+  var namespace = contextView && contextView.namespace;
+  var view = name && context.meta.views.find(name, namespace);
+  if (!view) {
+    if (this.optional) return exports.emptyTemplate;
+    var message = context.meta.views.findErrorMessage(name, contextView);
+    throw new Error(message);
+  }
+  return view;
+};
+
+function ParentWrapper(template, expression) {
+  this.template = template;
+  this.expression = expression;
+}
+ParentWrapper.prototype = new saddle.Template();
+ParentWrapper.prototype.type = 'ParentWrapper';
+ParentWrapper.prototype.serialize = function() {
+  return serializeObject.instance(this, this.template, this.expression);
+};
+ParentWrapper.prototype.get = function(context, unescaped) {
+  return (this.expression || this.template).get(context.forViewParent(), unescaped);
+};
+ParentWrapper.prototype.getFragment = function(context, binding) {
+  return this.template.getFragment(context.forViewParent(), binding);
+};
+ParentWrapper.prototype.appendTo = function(parent, context) {
+  this.template.appendTo(parent, context.forViewParent());
+};
+ParentWrapper.prototype.attachTo = function(parent, node, context) {
+  return this.template.attachTo(parent, node, context.forViewParent());
+};
+ParentWrapper.prototype.resolve = function(context) {
+  return this.expression && this.expression.resolve(context.forViewParent());
+};
+ParentWrapper.prototype.dependencies = function(context) {
+  return (this.expression || this.template).dependencies(context.forViewParent());
+};
+
+function ViewsMap() {}
+function Views() {
+  this.nameMap = new ViewsMap();
+  this.elementMap = new ViewsMap();
+}
+Views.prototype.find = function(name, namespace) {
+  var map = this.nameMap;
+
+  // Exact match lookup
+  var exactName = (namespace) ? namespace + ':' + name : name;
+  var match = map[exactName];
+  if (match) return match;
+
+  // Relative lookup
+  var segments = name.split(':');
+  var segmentsDepth = segments.length;
+  if (namespace) segments = namespace.split(':').concat(segments);
+  // Iterate through segments, leaving the `segmentsDepth` segments and
+  // removing the second to `segmentsDepth` segment to traverse up the
+  // namespaces. Decrease `segmentsDepth` if not found and repeat again.
+  while (segmentsDepth > 0) {
+    while (segments.length > segmentsDepth) {
+      segments.splice(-1 - segmentsDepth, 1);
+      var testName = segments.join(':');
+      var match = map[testName];
+      if (match) return match;
+    }
+    segmentsDepth--;
+  }
+};
+Views.prototype.register = function(name, source, options) {
+  var mapName = name.replace(/:index$/, '');
+  var view = this.nameMap[mapName];
+  if (view) {
+    // Recreate the view if it already exists. We re-apply the constructor
+    // instead of creating a new view object so that references to object
+    // can be cached after finding the first time
+    var componentFactory = view.componentFactory;
+    View.call(view, this, name, source, options);
+    view.componentFactory = componentFactory;
+  } else {
+    view = new View(this, name, source, options);
+  }
+  this.nameMap[mapName] = view;
+  if (options && options.element) this.elementMap[options.element] = view;
+  return view;
+};
+Views.prototype.serialize = function(options) {
+  var out = 'function(derbyTemplates, views) {' +
+    'var expressions = derbyTemplates.expressions;' +
+    'var templates = derbyTemplates.templates;';
+  for (var name in this.nameMap) {
+    out += this.nameMap[name].serialize(options);
+  }
+  return out + '}';
+};
+Views.prototype.findErrorMessage = function(name, contextView) {
+  var names = Object.keys(this.nameMap);
+  var message = 'Cannot find view "' + name + '" in' +
+    [''].concat(names).join('\n  ') + '\n';
+  if (contextView) {
+    message += '\nWithin template "' + contextView.name + '":\n' + contextView.source;
+  }
+  return message;
+};
+
+
+function MarkupHook() {}
+MarkupHook.prototype.module = saddle.Template.prototype.module;
+
+function ElementOn(name, expression) {
+  this.name = name;
+  this.expression = expression;
+}
+ElementOn.prototype = new MarkupHook();
+ElementOn.prototype.type = 'ElementOn';
+ElementOn.prototype.serialize = function() {
+  return serializeObject.instance(this, this.name, this.expression);
+};
+ElementOn.prototype.emit = function(context, element) {
+  var expression = this.expression;
+  element.addEventListener(this.name, function elementOnListener(event) {
+    var modelData = context.controller.model.data;
+    modelData.$event = event;
+    modelData.$element = element;
+    var out = expression.apply(context);
+    delete modelData.$event;
+    delete modelData.$element;
+    return out;
+  }, false);
+};
+
+function ComponentOn(name, expression) {
+  this.name = name;
+  this.expression = expression;
+}
+ComponentOn.prototype = new MarkupHook();
+ComponentOn.prototype.type = 'ComponentOn';
+ComponentOn.prototype.serialize = function() {
+  return serializeObject.instance(this, this.name, this.expression);
+};
+ComponentOn.prototype.emit = function(context, component) {
+  var expression = this.expression;
+  component.on(this.name, function componentOnListener() {
+    var args = arguments.length && Array.prototype.slice.call(arguments);
+    return expression.apply(context, args);
+  });
+};
+
+function ComponentMarker() {}
+ComponentMarker.prototype = new MarkupHook();
+ComponentMarker.prototype.type = 'ComponentMarker';
+ComponentMarker.prototype.serialize = function() {
+  return serializeObject.instance(this);
+};
+ComponentMarker.prototype.emit = function(context, node) {
+  node.$markComponent = context.controller;
+};
+
+function MarkupAs(segments) {
+  this.segments = segments;
+  this.lastSegment = segments.pop();
+}
+MarkupAs.prototype = new MarkupHook();
+MarkupAs.prototype.type = 'MarkupAs';
+MarkupAs.prototype.serialize = function() {
+  var segments = this.segments.concat(this.lastSegment);
+  return serializeObject.instance(this, segments);
+};
+MarkupAs.prototype.emit = function(context, target) {
+  var node = traverseAndCreate(context.controller, this.segments);
+  node[this.lastSegment] = target;
+};
+
+function traverseAndCreate(node, segments) {
+  var len = segments.length;
+  if (!len) return node;
+  for (var i = 0; i < len; i++) {
+    var segment = segments[i];
+    node = node[segment] || (node[segment] = {});
+  }
+  return node;
+}
+
+function hasKeys(value) {
+  if (!value) return false;
+  for (var key in value) {
+    return true;
+  }
+  return false;
+}
+
+},{"saddle":37,"serialize-object":38}],37:[function(require,module,exports){
+if (typeof require === 'function') {
+  var serializeObject = require('serialize-object');
+}
+
+// UPDATE_PROPERTIES map HTML attribute names to an Element DOM property that
+// should be used for setting on bindings updates instead of s'test'Attribute.
+//
+// https://github.com/jquery/jquery/blob/1.x-master/src/attributes/prop.js
+// https://github.com/jquery/jquery/blob/master/src/attributes/prop.js
+// http://webbugtrack.blogspot.com/2007/08/bug-242-setattribute-doesnt-always-work.html
+var UPDATE_PROPERTIES = {
+  checked: 'checked'
+, disabled: 'disabled'
+, selected: 'selected'
+, type: 'type'
+, value: 'value'
+, 'class': 'className'
+, 'for': 'htmlFor'
+, tabindex: 'tabIndex'
+, readonly: 'readOnly'
+, maxlength: 'maxLength'
+, cellspacing: 'cellSpacing'
+, cellpadding: 'cellPadding'
+, rowspan: 'rowSpan'
+, colspan: 'colSpan'
+, usemap: 'useMap'
+, frameborder: 'frameBorder'
+, contenteditable: 'contentEditable'
+, enctype: 'encoding'
+, id: 'id'
+, title: 'title'
+};
+// CREATE_PROPERTIES map HTML attribute names to an Element DOM property that
+// should be used for setting on Element rendering instead of setAttribute.
+// input.defaultChecked and input.defaultValue affect the attribute, so we want
+// to use these for initial dynamic rendering. For binding updates,
+// input.checked and input.value are modified.
+var CREATE_PROPERTIES = {};
+mergeInto(UPDATE_PROPERTIES, CREATE_PROPERTIES);
+CREATE_PROPERTIES.checked = 'defaultChecked';
+CREATE_PROPERTIES.value = 'defaultValue';
+
+// http://www.w3.org/html/wg/drafts/html/master/syntax.html#void-elements
+var VOID_ELEMENTS = {
+  area: true
+, base: true
+, br: true
+, col: true
+, embed: true
+, hr: true
+, img: true
+, input: true
+, keygen: true
+, link: true
+, menuitem: true
+, meta: true
+, param: true
+, source: true
+, track: true
+, wbr: true
+};
+
+var NAMESPACE_URIS = {
+  svg: 'http://www.w3.org/2000/svg'
+, xlink: 'http://www.w3.org/1999/xlink'
+, xmlns: 'http://www.w3.org/2000/xmlns/'
+};
+
+exports.CREATE_PROPERTIES = CREATE_PROPERTIES;
+exports.UPDATE_PROPERTIES = UPDATE_PROPERTIES;
+exports.VOID_ELEMENTS = VOID_ELEMENTS;
+exports.NAMESPACE_URIS = NAMESPACE_URIS;
+
+// Template Classes
+exports.Template = Template;
+exports.Doctype = Doctype;
+exports.Text = Text;
+exports.DynamicText = DynamicText;
+exports.Comment = Comment;
+exports.DynamicComment = DynamicComment;
+exports.Html = Html;
+exports.DynamicHtml = DynamicHtml;
+exports.Element = Element;
+exports.DynamicElement = DynamicElement;
+exports.Block = Block;
+exports.ConditionalBlock = ConditionalBlock;
+exports.EachBlock = EachBlock;
+
+exports.Attribute = Attribute;
+exports.DynamicAttribute = DynamicAttribute;
+
+// Binding Classes
+exports.Binding = Binding;
+exports.NodeBinding = NodeBinding;
+exports.AttributeBinding = AttributeBinding;
+exports.RangeBinding = RangeBinding;
+
+function Template(content) {
+  this.content = content;
+}
+Template.prototype.get = function(context, unescaped) {
+  return contentHtml(this.content, context, unescaped);
+};
+Template.prototype.getFragment = function(context, binding) {
+  var fragment = document.createDocumentFragment();
+  this.appendTo(fragment, context, binding);
+  return fragment;
+};
+Template.prototype.appendTo = function(parent, context) {
+  appendContent(parent, this.content, context);
+};
+Template.prototype.attachTo = function(parent, node, context) {
+  return attachContent(parent, node, this.content, context);
+};
+Template.prototype.update = function() {};
+Template.prototype.stringify = function(value) {
+  return (value == null) ? '' : value + '';
+};
+Template.prototype.module = 'templates';
+Template.prototype.type = 'Template';
+Template.prototype.serialize = function() {
+  return serializeObject.instance(this, this.content);
+};
+
+
+function Doctype(name, publicId, systemId) {
+  this.name = name;
+  this.publicId = publicId;
+  this.systemId = systemId;
+}
+Doctype.prototype = new Template();
+Doctype.prototype.get = function() {
+  var publicText = (this.publicId) ?
+    ' PUBLIC "' + this.publicId  + '"' :
+    '';
+  var systemText = (this.systemId) ?
+    (this.publicId) ?
+      ' "' + this.systemId + '"' :
+      ' SYSTEM "' + this.systemId + '"' :
+    '';
+  return '<!DOCTYPE ' + this.name + publicText + systemText + '>';
+};
+Doctype.prototype.appendTo = function() {
+  // Doctype could be created via:
+  //   document.implementation.createDocumentType(this.name, this.publicId, this.systemId)
+  // However, it does not appear possible or useful to append it to the
+  // document fragment. Therefore, just don't render it in the browser
+};
+Doctype.prototype.attachTo = function(parent, node) {
+  if (!node || node.nodeType !== 10) {
+    throw attachError(parent, node);
+  }
+  return node.nextSibling;
+};
+Doctype.prototype.type = 'Doctype';
+Doctype.prototype.serialize = function() {
+  return serializeObject.instance(this, this.name, this.publicId, this.systemId);
+};
+
+function Text(data) {
+  this.data = data;
+  this.escaped = escapeHtml(data);
+}
+Text.prototype = new Template();
+Text.prototype.get = function(context, unescaped) {
+  return (unescaped) ? this.data : this.escaped;
+};
+Text.prototype.appendTo = function(parent) {
+  var node = document.createTextNode(this.data);
+  parent.appendChild(node);
+};
+Text.prototype.attachTo = function(parent, node) {
+  return attachText(parent, node, this.data, this);
+};
+Text.prototype.type = 'Text';
+Text.prototype.serialize = function() {
+  return serializeObject.instance(this, this.data);
+};
+
+function DynamicText(expression) {
+  this.expression = expression;
+}
+DynamicText.prototype = new Template();
+DynamicText.prototype.get = function(context, unescaped) {
+  var value = this.expression.get(context);
+  if (value instanceof Template) {
+    do {
+      value = value.get(context, unescaped);
+    } while (value instanceof Template);
+    return value;
+  }
+  var data = this.stringify(value);
+  return (unescaped) ? data : escapeHtml(data);
+};
+DynamicText.prototype.appendTo = function(parent, context) {
+  var value = this.expression.get(context);
+  if (value instanceof Template) {
+    value.appendTo(parent, context);
+    return;
+  }
+  var data = this.stringify(value);
+  var node = document.createTextNode(data);
+  parent.appendChild(node);
+  addNodeBinding(this, context, node);
+};
+DynamicText.prototype.attachTo = function(parent, node, context) {
+  var value = this.expression.get(context);
+  if (value instanceof Template) {
+    return value.attachTo(parent, node, context);
+  }
+  var data = this.stringify(value);
+  return attachText(parent, node, data, this, context);
+};
+DynamicText.prototype.update = function(context, binding) {
+  binding.node.data = this.stringify(this.expression.get(context));
+};
+DynamicText.prototype.type = 'DynamicText';
+DynamicText.prototype.serialize = function() {
+  return serializeObject.instance(this, this.expression);
+};
+
+function attachText(parent, node, data, template, context) {
+  if (!node) {
+    var newNode = document.createTextNode(data);
+    parent.appendChild(newNode);
+    addNodeBinding(template, context, newNode);
+    return;
+  }
+  if (node.nodeType === 3) {
+    // Proceed if nodes already match
+    if (node.data === data) {
+      addNodeBinding(template, context, node);
+      return node.nextSibling;
+    }
+    data = normalizeLineBreaks(data);
+    // Split adjacent text nodes that would have been merged together in HTML
+    var nextNode = splitData(node, data.length);
+    if (node.data !== data) {
+      throw attachError(parent, node);
+    }
+    addNodeBinding(template, context, node);
+    return nextNode;
+  }
+  // An empty text node might not be created at the end of some text
+  if (data === '') {
+    var newNode = document.createTextNode('');
+    parent.insertBefore(newNode, node || null);
+    addNodeBinding(template, context, newNode);
+    return node;
+  }
+  throw attachError(parent, node);
+}
+
+function Comment(data, hooks) {
+  this.data = data;
+  this.hooks = hooks;
+}
+Comment.prototype = new Template();
+Comment.prototype.get = function() {
+  return '<!--' + this.data + '-->';
+};
+Comment.prototype.appendTo = function(parent, context) {
+  var node = document.createComment(this.data);
+  emitHooks(this.hooks, context, node);
+  parent.appendChild(node);
+};
+Comment.prototype.attachTo = function(parent, node, context) {
+  return attachComment(parent, node, this.data, this, context);
+};
+Comment.prototype.type = 'Comment';
+Comment.prototype.serialize = function() {
+  return serializeObject.instance(this, this.data, this.hooks);
+}
+
+function DynamicComment(expression, hooks) {
+  this.expression = expression;
+  this.hooks = hooks;
+}
+DynamicComment.prototype = new Template();
+DynamicComment.prototype.get = function(context) {
+  var value = getUnescapedValue(this.expression, context);
+  var data = this.stringify(value);
+  return '<!--' + data + '-->';
+};
+DynamicComment.prototype.appendTo = function(parent, context) {
+  var value = getUnescapedValue(this.expression, context);
+  var data = this.stringify(value);
+  var node = document.createComment(data);
+  parent.appendChild(node);
+  addNodeBinding(this, context, node);
+};
+DynamicComment.prototype.attachTo = function(parent, node, context) {
+  var value = getUnescapedValue(this.expression, context);
+  var data = this.stringify(value);
+  return attachComment(parent, node, data, this, context);
+};
+DynamicComment.prototype.update = function(context, binding) {
+  var value = getUnescapedValue(this.expression, context);
+  binding.node.data = this.stringify(value);
+};
+DynamicComment.prototype.type = 'DynamicComment';
+DynamicComment.prototype.serialize = function() {
+  return serializeObject.instance(this, this.expression, this.hooks);
+}
+
+function attachComment(parent, node, data, template, context) {
+  // Sometimes IE fails to create Comment nodes from HTML or innerHTML.
+  // This is an issue inside of <select> elements, for example.
+  if (!node || node.nodeType !== 8) {
+    var newNode = document.createComment(data);
+    parent.insertBefore(newNode, node || null);
+    addNodeBinding(template, context, newNode);
+    return node;
+  }
+  // Proceed if nodes already match
+  if (node.data === data) {
+    addNodeBinding(template, context, node);
+    return node.nextSibling;
+  }
+  throw attachError(parent, node);
+}
+
+function addNodeBinding(template, context, node) {
+  emitHooks(template.hooks, context, node);
+  if (template.expression) {
+    context.addBinding(new NodeBinding(template, context, node));
+  }
+}
+
+function Html(data) {
+  this.data = data;
+}
+Html.prototype = new Template();
+Html.prototype.get = function() {
+  return this.data;
+};
+Html.prototype.appendTo = function(parent) {
+  var fragment = createHtmlFragment(parent, this.data);
+  parent.appendChild(fragment);
+};
+Html.prototype.attachTo = function(parent, node) {
+  return attachHtml(parent, node, this.data);
+};
+Html.prototype.type = "Html";
+Html.prototype.serialize = function() {
+  return serializeObject.instance(this, this.data);
+};
+
+function DynamicHtml(expression) {
+  this.expression = expression;
+  this.ending = '/' + expression;
+}
+DynamicHtml.prototype = new Template();
+DynamicHtml.prototype.get = function(context) {
+  var value = getUnescapedValue(this.expression, context);
+  return this.stringify(value);
+};
+DynamicHtml.prototype.appendTo = function(parent, context, binding) {
+  var start = document.createComment(this.expression);
+  var end = document.createComment(this.ending);
+  var value = getUnescapedValue(this.expression, context);
+  var html = this.stringify(value);
+  var fragment = createHtmlFragment(parent, html);
+  parent.appendChild(start);
+  parent.appendChild(fragment);
+  parent.appendChild(end);
+  updateRange(context, binding, this, start, end);
+};
+DynamicHtml.prototype.attachTo = function(parent, node, context) {
+  var start = document.createComment(this.expression);
+  var end = document.createComment(this.ending);
+  var value = getUnescapedValue(this.expression, context);
+  var html = this.stringify(value);
+  parent.insertBefore(start, node || null);
+  node = attachHtml(parent, node, html);
+  parent.insertBefore(end, node || null);
+  updateRange(context, null, this, start, end);
+  return node;
+};
+DynamicHtml.prototype.update = function(context, binding) {
+  // Get start and end in advance, since binding is mutated in getFragment
+  var start = binding.start;
+  var end = binding.end;
+  var value = getUnescapedValue(this.expression, context);
+  var html = this.stringify(value);
+  var fragment = createHtmlFragment(binding.start.parentNode, html);
+  var innerOnly = true;
+  replaceRange(context, start, end, fragment, binding, innerOnly);
+};
+DynamicHtml.prototype.type = 'DynamicHtml';
+DynamicHtml.prototype.serialize = function() {
+  return serializeObject.instance(this, this.expression);
+};
+
+function createHtmlFragment(parent, html) {
+  if (parent.nodeType === 1) {
+    var range = document.createRange();
+    range.selectNodeContents(parent);
+    return range.createContextualFragment(html);
+  }
+  var div = document.createElement('div');
+  var range = document.createRange();
+  div.innerHTML = html;
+  range.selectNodeContents(div);
+  return range.extractContents();
+}
+function attachHtml(parent, node, html) {
+  var fragment = createHtmlFragment(parent, html);
+  for (var i = 0, len = fragment.childNodes.length; i < len; i++) {
+    if (!node) throw attachError(parent, node);
+    node = node.nextSibling;
+  }
+  return node;
+}
+
+function Attribute(data, ns) {
+  this.data = data;
+  this.ns = ns;
+}
+Attribute.prototype.get = Attribute.prototype.getBound = function(context) {
+  return this.data;
+};
+Attribute.prototype.module = Template.prototype.module;
+Attribute.prototype.type = 'Attribute';
+Attribute.prototype.serialize = function() {
+  return serializeObject.instance(this, this.data, this.ns);
+};
+
+function DynamicAttribute(expression, ns) {
+  // In attributes, expression may be an instance of Template or Expression
+  this.expression = expression;
+  this.ns = ns;
+  this.elementNs = null;
+}
+DynamicAttribute.prototype = new Attribute();
+DynamicAttribute.prototype.get = function(context) {
+  return getUnescapedValue(this.expression, context);
+};
+DynamicAttribute.prototype.getBound = function(context, element, name, elementNs) {
+  this.elementNs = elementNs;
+  context.addBinding(new AttributeBinding(this, context, element, name));
+  return getUnescapedValue(this.expression, context);
+};
+DynamicAttribute.prototype.update = function(context, binding) {
+  var value = getUnescapedValue(this.expression, context);
+  var element = binding.element;
+  var propertyName = !this.elementNs && UPDATE_PROPERTIES[binding.name];
+  if (propertyName) {
+    if (propertyName === 'value' && (element.value === value || element.valueAsNumber === value)) return;
+    if (value === void 0) value = null;
+    element[propertyName] = value;
+    return;
+  }
+  if (value === false || value == null) {
+    if (this.ns) {
+      element.removeAttributeNS(this.ns, binding.name);
+    } else {
+      element.removeAttribute(binding.name);
+    }
+    return;
+  }
+  if (value === true) value = binding.name;
+  if (this.ns) {
+    element.setAttributeNS(this.ns, binding.name, value);
+  } else {
+    element.setAttribute(binding.name, value);
+  }
+};
+DynamicAttribute.prototype.type = 'DynamicAttribute';
+DynamicAttribute.prototype.serialize = function() {
+  return serializeObject.instance(this, this.expression, this.ns);
+};
+
+function getUnescapedValue(expression, context) {
+  var unescaped = true;
+  var value = expression.get(context, unescaped);
+  while (value instanceof Template) {
+    value = value.get(context, unescaped);
+  }
+  return value;
+}
+
+function Element(tagName, attributes, content, hooks, selfClosing, notClosed, ns) {
+  this.tagName = tagName;
+  this.attributes = attributes;
+  this.content = content;
+  this.hooks = hooks;
+  this.selfClosing = selfClosing;
+  this.notClosed = notClosed;
+  this.ns = ns;
+
+  this.endTag = getEndTag(tagName, selfClosing, notClosed);
+  this.startClose = getStartClose(selfClosing);
+  var lowerTagName = tagName && tagName.toLowerCase();
+  this.unescapedContent = (lowerTagName === 'script' || lowerTagName === 'style');
+}
+Element.prototype = new Template();
+Element.prototype.getTagName = function() {
+  return this.tagName;
+};
+Element.prototype.getEndTag = function() {
+  return this.endTag;
+};
+Element.prototype.get = function(context) {
+  var tagName = this.getTagName(context);
+  var endTag = this.getEndTag(tagName);
+  var tagItems = [tagName];
+  for (var key in this.attributes) {
+    var value = this.attributes[key].get(context);
+    if (value === true) {
+      tagItems.push(key);
+    } else if (value !== false && value != null) {
+      tagItems.push(key + '="' + escapeAttribute(value) + '"');
+    }
+  }
+  var startTag = '<' + tagItems.join(' ') + this.startClose;
+  if (this.content) {
+    var inner = contentHtml(this.content, context, this.unescapedContent);
+    return startTag + inner + endTag;
+  }
+  return startTag + endTag;
+};
+Element.prototype.appendTo = function(parent, context) {
+  var tagName = this.getTagName(context);
+  var element = (this.ns) ?
+    document.createElementNS(this.ns, tagName) :
+    document.createElement(tagName);
+  emitHooks(this.hooks, context, element);
+  for (var key in this.attributes) {
+    var attribute = this.attributes[key];
+    var value = attribute.getBound(context, element, key, this.ns);
+    if (value === false || value == null) continue;
+    var propertyName = !this.ns && CREATE_PROPERTIES[key];
+    if (propertyName) {
+      element[propertyName] = value;
+      continue;
+    }
+    if (value === true) value = key;
+    if (attribute.ns) {
+      element.setAttributeNS(attribute.ns, key, value);
+    } else {
+      element.setAttribute(key, value);
+    }
+  }
+  if (this.content) appendContent(element, this.content, context);
+  parent.appendChild(element);
+};
+Element.prototype.attachTo = function(parent, node, context) {
+  var tagName = this.getTagName(context);
+  if (
+    !node ||
+    node.nodeType !== 1 ||
+    node.tagName.toLowerCase() !== tagName.toLowerCase()
+  ) {
+    throw attachError(parent, node);
+  }
+  emitHooks(this.hooks, context, node);
+  for (var key in this.attributes) {
+    // Get each attribute to create bindings
+    this.attributes[key].getBound(context, node, key, this.ns);
+    // TODO: Ideally, this would also check that the node's current attributes
+    // are equivalent, but there are some tricky edge cases
+  }
+  if (this.content) attachContent(node, node.firstChild, this.content, context);
+  return node.nextSibling;
+};
+Element.prototype.type = 'Element';
+Element.prototype.serialize = function() {
+  return serializeObject.instance(
+    this
+  , this.tagName
+  , this.attributes
+  , this.content
+  , this.hooks
+  , this.selfClosing
+  , this.notClosed
+  , this.ns
+  );
+};
+
+function DynamicElement(tagName, attributes, content, hooks, selfClosing, notClosed, ns) {
+  this.tagName = tagName;
+  this.attributes = attributes;
+  this.content = content;
+  this.hooks = hooks;
+  this.selfClosing = selfClosing;
+  this.notClosed = notClosed;
+  this.ns = ns;
+
+  this.startClose = getStartClose(selfClosing);
+  this.unescapedContent = false;
+}
+DynamicElement.prototype = new Element();
+DynamicElement.prototype.getTagName = function(context) {
+  return getUnescapedValue(this.tagName, context);
+};
+DynamicElement.prototype.getEndTag = function(tagName) {
+  return getEndTag(tagName, this.selfClosing, this.notClosed);
+};
+DynamicElement.prototype.type = 'DynamicElement';
+
+function getStartClose(selfClosing) {
+  return (selfClosing) ? ' />' : '>';
+}
+
+function getEndTag(tagName, selfClosing, notClosed) {
+  var lowerTagName = tagName && tagName.toLowerCase();
+  var isVoid = VOID_ELEMENTS[lowerTagName];
+  return (isVoid || selfClosing || notClosed) ? '' : '</' + tagName + '>';
+}
+
+function getAttributeValue(element, name) {
+  var propertyName = UPDATE_PROPERTIES[name];
+  return (propertyName) ? element[propertyName] : element.getAttribute(name);
+}
+
+function emitHooks(hooks, context, value) {
+  if (!hooks) return;
+  for (var i = 0, len = hooks.length; i < len; i++) {
+    hooks[i].emit(context, value);
+  }
+}
+
+function Block(expression, content) {
+  this.expression = expression;
+  this.ending = '/' + expression;
+  this.content = content;
+}
+Block.prototype = new Template();
+Block.prototype.get = function(context, unescaped) {
+  var blockContext = context.child(this.expression);
+  return contentHtml(this.content, blockContext, unescaped);
+};
+Block.prototype.appendTo = function(parent, context, binding) {
+  var blockContext = context.child(this.expression);
+  var start = document.createComment(this.expression);
+  var end = document.createComment(this.ending);
+  parent.appendChild(start);
+  appendContent(parent, this.content, blockContext);
+  parent.appendChild(end);
+  updateRange(context, binding, this, start, end);
+};
+Block.prototype.attachTo = function(parent, node, context) {
+  var blockContext = context.child(this.expression);
+  var start = document.createComment(this.expression);
+  var end = document.createComment(this.ending);
+  parent.insertBefore(start, node || null);
+  node = attachContent(parent, node, this.content, blockContext);
+  parent.insertBefore(end, node || null);
+  updateRange(context, null, this, start, end);
+  return node;
+};
+Block.prototype.type = 'Block';
+Block.prototype.serialize = function() {
+  return serializeObject.instance(this, this.expression, this.content);
+};
+Block.prototype.update = function(context, binding) {
+  // Get start and end in advance, since binding is mutated in getFragment
+  var start = binding.start;
+  var end = binding.end;
+  var fragment = this.getFragment(context, binding);
+  replaceRange(context, start, end, fragment, binding);
+};
+
+function ConditionalBlock(expressions, contents) {
+  this.expressions = expressions;
+  this.beginning = expressions.join('; ');
+  this.ending = '/' + this.beginning;
+  this.contents = contents;
+}
+ConditionalBlock.prototype = new Block();
+ConditionalBlock.prototype.get = function(context, unescaped) {
+  var condition = this.getCondition(context);
+  if (condition == null) return '';
+  var expression = this.expressions[condition];
+  var blockContext = context.child(expression);
+  return contentHtml(this.contents[condition], blockContext, unescaped);
+};
+ConditionalBlock.prototype.appendTo = function(parent, context, binding) {
+  var start = document.createComment(this.beginning);
+  var end = document.createComment(this.ending);
+  parent.appendChild(start);
+  var condition = this.getCondition(context);
+  if (condition != null) {
+    var expression = this.expressions[condition];
+    var blockContext = context.child(expression);
+    appendContent(parent, this.contents[condition], blockContext);
+  }
+  parent.appendChild(end);
+  updateRange(context, binding, this, start, end, null, condition);
+};
+ConditionalBlock.prototype.attachTo = function(parent, node, context) {
+  var start = document.createComment(this.beginning);
+  var end = document.createComment(this.ending);
+  parent.insertBefore(start, node || null);
+  var condition = this.getCondition(context);
+  if (condition != null) {
+    var expression = this.expressions[condition];
+    var blockContext = context.child(expression);
+    node = attachContent(parent, node, this.contents[condition], blockContext);
+  }
+  parent.insertBefore(end, node || null);
+  updateRange(context, null, this, start, end, null, condition);
+  return node;
+};
+ConditionalBlock.prototype.type = 'ConditionalBlock';
+ConditionalBlock.prototype.serialize = function() {
+  return serializeObject.instance(this, this.expressions, this.contents);
+};
+ConditionalBlock.prototype.update = function(context, binding) {
+  var condition = this.getCondition(context);
+  if (condition === binding.condition) return;
+  binding.condition = condition;
+  // Get start and end in advance, since binding is mutated in getFragment
+  var start = binding.start;
+  var end = binding.end;
+  var fragment = this.getFragment(context, binding);
+  replaceRange(context, start, end, fragment, binding);
+};
+ConditionalBlock.prototype.getCondition = function(context) {
+  for (var i = 0, len = this.expressions.length; i < len; i++) {
+    if (this.expressions[i].truthy(context)) {
+      return i;
+    }
+  }
+};
+
+function EachBlock(expression, content, elseContent) {
+  this.expression = expression;
+  this.ending = '/' + expression;
+  this.content = content;
+  this.elseContent = elseContent;
+}
+EachBlock.prototype = new Block();
+EachBlock.prototype.get = function(context, unescaped) {
+  var items = this.expression.get(context);
+  var listContext = context.child(this.expression);
+  if (items && items.length) {
+    var html = '';
+    for (var i = 0, len = items.length; i < len; i++) {
+      var itemContext = listContext.eachChild(i);
+      html += contentHtml(this.content, itemContext, unescaped);
+    }
+    return html;
+  } else if (this.elseContent) {
+    return contentHtml(this.elseContent, listContext, unescaped);
+  }
+  return '';
+};
+EachBlock.prototype.appendTo = function(parent, context, binding) {
+  var items = this.expression.get(context);
+  var listContext = context.child(this.expression);
+  var start = document.createComment(this.expression);
+  var end = document.createComment(this.ending);
+  parent.appendChild(start);
+  if (items && items.length) {
+    for (var i = 0, len = items.length; i < len; i++) {
+      var itemContext = listContext.eachChild(i);
+      this.appendItemTo(parent, itemContext, start);
+    }
+  } else if (this.elseContent) {
+    appendContent(parent, this.elseContent, listContext);
+  }
+  parent.appendChild(end);
+  updateRange(context, binding, this, start, end);
+};
+EachBlock.prototype.appendItemTo = function(parent, context, itemFor, binding) {
+  var before = parent.lastChild;
+  var start, end;
+  appendContent(parent, this.content, context);
+  if (before === parent.lastChild) {
+    start = end = document.createComment('empty');
+    parent.appendChild(start);
+  } else {
+    start = (before && before.nextSibling) || parent.firstChild;
+    end = parent.lastChild;
+  }
+  updateRange(context, binding, this, start, end, itemFor);
+};
+EachBlock.prototype.attachTo = function(parent, node, context) {
+  var items = this.expression.get(context);
+  var listContext = context.child(this.expression);
+  var start = document.createComment(this.expression);
+  var end = document.createComment(this.ending);
+  parent.insertBefore(start, node || null);
+  if (items && items.length) {
+    for (var i = 0, len = items.length; i < len; i++) {
+      var itemContext = listContext.eachChild(i);
+      node = this.attachItemTo(parent, node, itemContext, start);
+    }
+  } else if (this.elseContent) {
+    node = attachContent(parent, node, this.elseContent, listContext);
+  }
+  parent.insertBefore(end, node || null);
+  updateRange(context, null, this, start, end);
+  return node;
+};
+EachBlock.prototype.attachItemTo = function(parent, node, context, itemFor) {
+  var start, end;
+  var nextNode = attachContent(parent, node, this.content, context);
+  if (nextNode === node) {
+    start = end = document.createComment('empty');
+    parent.insertBefore(start, node || null);
+  } else {
+    start = node;
+    end = (nextNode && nextNode.previousSibling) || parent.lastChild;
+  }
+  updateRange(context, null, this, start, end, itemFor);
+  return nextNode;
+};
+EachBlock.prototype.update = function(context, binding) {
+  var start = binding.start;
+  var end = binding.end;
+  if (binding.itemFor) {
+    var fragment = document.createDocumentFragment();
+    this.appendItemTo(fragment, context, binding.itemFor, binding);
+  } else {
+    var fragment = this.getFragment(context, binding);
+  }
+  replaceRange(context, start, end, fragment, binding);
+};
+EachBlock.prototype.insert = function(context, binding, index, howMany) {
+  var items = this.expression.get(context);
+  var listContext = context.child(this.expression);
+  var node = indexStartNode(binding, index);
+  var fragment = document.createDocumentFragment();
+  for (var i = index, len = index + howMany; i < len; i++) {
+    var itemContext = listContext.eachChild(i);
+    this.appendItemTo(fragment, itemContext, binding.start);
+  }
+  binding.start.parentNode.insertBefore(fragment, node || null);
+};
+EachBlock.prototype.remove = function(context, binding, index, howMany) {
+  var node = indexStartNode(binding, index);
+  var i = 0;
+  var parent = binding.start.parentNode;
+  while (node) {
+    var nextNode = node.nextSibling;
+    parent.removeChild(node);
+    emitRemoved(context, node, binding);
+    if (node.$bindEnd && node.$bindEnd.itemFor === binding.start) {
+      if (howMany === ++i) return;
+    }
+    node = nextNode;
+  }
+};
+EachBlock.prototype.move = function(context, binding, from, to, howMany) {
+  var node = indexStartNode(binding, from);
+  var fragment = document.createDocumentFragment();
+  var i = 0;
+  while (node) {
+    var nextNode = node.nextSibling;
+    fragment.appendChild(node);
+    if (node.$bindEnd && node.$bindEnd.itemFor === binding.start) {
+      if (howMany === ++i) break;
+    }
+    node = nextNode;
+  }
+  node = indexStartNode(binding, to);
+  binding.start.parentNode.insertBefore(fragment, node || null);
+};
+EachBlock.prototype.type = 'EachBlock';
+EachBlock.prototype.serialize = function() {
+  return serializeObject.instance(this, this.expression, this.content, this.elseContent);
+};
+
+function indexStartNode(binding, index) {
+  var node = binding.start;
+  var i = 0;
+  while (node = node.nextSibling) {
+    if (node === binding.end) return node;
+    if (node.$bindStart && node.$bindStart.itemFor === binding.start) {
+      if (index === i) return node;
+      i++;
+    }
+  }
+}
+
+function updateRange(context, binding, template, start, end, itemFor, condition) {
+  if (binding) {
+    binding.start = start;
+    binding.end = end;
+    binding.condition = condition;
+    setNodeProperty(start, '$bindStart', binding);
+    setNodeProperty(end, '$bindEnd', binding);
+  } else {
+    context.addBinding(new RangeBinding(template, context, start, end, itemFor, condition));
+  }
+}
+
+function appendContent(parent, content, context) {
+  for (var i = 0, len = content.length; i < len; i++) {
+    content[i].appendTo(parent, context);
+  }
+}
+function attachContent(parent, node, content, context) {
+  for (var i = 0, len = content.length; i < len; i++) {
+    node = content[i].attachTo(parent, node, context);
+  }
+  return node;
+}
+function contentHtml(content, context, unescaped) {
+  var html = '';
+  for (var i = 0, len = content.length; i < len; i++) {
+    html += content[i].get(context, unescaped);
+  }
+  return html;
+}
+function replaceRange(context, start, end, fragment, binding, innerOnly) {
+  var parent = start.parentNode;
+  // This shouldn't happen if bindings are cleaned up properly, but check
+  // in case they aren't
+  if (!parent) return;
+  if (start === end) {
+    parent.replaceChild(fragment, start);
+    emitRemoved(context, start, binding);
+    return;
+  }
+  // Remove all nodes from start to end
+  var node = (innerOnly) ? start.nextSibling : start;
+  var nextNode;
+  while (node) {
+    nextNode = node.nextSibling;
+    emitRemoved(context, node, binding);
+    if (innerOnly && node === end) {
+      nextNode = end;
+      break;
+    }
+    parent.removeChild(node);
+    if (node === end) break;
+    node = nextNode;
+  }
+  // This also works if nextNode is null, by doing an append
+  parent.insertBefore(fragment, nextNode || null);
+}
+function emitRemoved(context, node, ignore) {
+  context.removeNode(node);
+  var binding = node.$bindNode;
+  if (binding && binding !== ignore) context.removeBinding(binding);
+  binding = node.$bindStart;
+  if (binding && binding !== ignore) context.removeBinding(binding);
+  var attributes = node.$bindAttributes;
+  if (attributes) {
+    for (var key in attributes) {
+      context.removeBinding(attributes[key]);
+    }
+  }
+  for (node = node.firstChild; node; node = node.nextSibling) {
+    emitRemoved(context, node, ignore);
+  }
+}
+
+function attachError(parent, node) {
+  if (typeof console !== 'undefined') {
+    console.error('Attach failed for', node, 'within', parent);
+  }
+  return new Error('Attaching bindings failed, because HTML structure ' +
+    'does not match client rendering.'
+  );
+}
+
+function Binding() {
+  this.meta = null;
+}
+Binding.prototype.type = 'Binding';
+Binding.prototype.update = function() {
+  this.template.update(this.context, this);
+};
+Binding.prototype.insert = function() {
+  this.update();
+};
+Binding.prototype.remove = function() {
+  this.update();
+};
+Binding.prototype.move = function() {
+  this.update();
+};
+
+function NodeBinding(template, context, node) {
+  this.template = template;
+  this.context = context;
+  this.node = node;
+  this.meta = null;
+  setNodeProperty(node, '$bindNode', this);
+}
+NodeBinding.prototype = new Binding();
+NodeBinding.prototype.type = 'NodeBinding';
+
+function AttributeBindingsMap() {}
+function AttributeBinding(template, context, element, name) {
+  this.template = template;
+  this.context = context;
+  this.element = element;
+  this.name = name;
+  this.meta = null;
+  var map = element.$bindAttributes ||
+    (element.$bindAttributes = new AttributeBindingsMap());
+  map[name] = this;
+}
+AttributeBinding.prototype = new Binding();
+AttributeBinding.prototype.type = 'AttributeBinding';
+
+function RangeBinding(template, context, start, end, itemFor, condition) {
+  this.template = template;
+  this.context = context;
+  this.start = start;
+  this.end = end;
+  this.itemFor = itemFor;
+  this.condition = condition;
+  this.meta = null;
+  setNodeProperty(start, '$bindStart', this);
+  setNodeProperty(end, '$bindEnd', this);
+}
+RangeBinding.prototype = new Binding();
+RangeBinding.prototype.type = 'RangeBinding';
+RangeBinding.prototype.insert = function(index, howMany) {
+  if (this.template.insert) {
+    this.template.insert(this.context, this, index, howMany);
+  } else {
+    this.template.update(this.context, this);
+  }
+};
+RangeBinding.prototype.remove = function(index, howMany) {
+  if (this.template.remove) {
+    this.template.remove(this.context, this, index, howMany);
+  } else {
+    this.template.update(this.context, this);
+  }
+};
+RangeBinding.prototype.move = function(from, to, howMany) {
+  if (this.template.move) {
+    this.template.move(this.context, this, from, to, howMany);
+  } else {
+    this.template.update(this.context, this);
+  }
+};
+
+
+//// Utility functions ////
+
+function noop() {}
+
+function mergeInto(from, to) {
+  for (var key in from) {
+    to[key] = from[key];
+  }
+}
+
+function escapeHtml(string) {
+  string = string + '';
+  return string.replace(/[&<]/g, function(match) {
+    return (match === '&') ? '&amp;' : '&lt;';
+  });
+}
+
+function escapeAttribute(string) {
+  string = string + '';
+  return string.replace(/[&"]/g, function(match) {
+    return (match === '&') ? '&amp;' : '&quot;';
+  });
+}
+
+
+//// Shims & workarounds ////
+
+// General notes:
+//
+// In all cases, Node.insertBefore should have `|| null` after its second
+// argument. IE works correctly when the argument is ommitted or equal
+// to null, but it throws and error if it is equal to undefined.
+
+if (!Array.isArray) {
+  Array.isArray = function(value) {
+    return Object.prototype.toString.call(value) === '[object Array]';
+  };
+}
+
+// Equivalent to textNode.splitText, which is buggy in IE <=9
+function splitData(node, index) {
+  var newNode = node.cloneNode(false);
+  newNode.deleteData(0, index);
+  node.deleteData(index, node.length - index);
+  node.parentNode.insertBefore(newNode, node.nextSibling || null);
+  return newNode;
+}
+
+// Defined so that it can be overriden in IE <=8
+function setNodeProperty(node, key, value) {
+  return node[key] = value;
+}
+
+function normalizeLineBreaks(string) {
+  return string;
+}
+
+(function() {
+  // Don't try to shim in Node.js environment
+  if (typeof document === 'undefined') return;
+
+  var div = document.createElement('div');
+  div.innerHTML = '\r\n<br>\n'
+  var windowsLength = div.firstChild.data.length;
+  var unixLength = div.lastChild.data.length;
+  if (windowsLength === 1 && unixLength === 1) {
+    normalizeLineBreaks = function(string) {
+      return string.replace(/\r\n/g, '\n');
+    };
+  } else if (windowsLength === 2 && unixLength === 2) {
+    normalizeLineBreaks = function(string) {
+      return string.replace(/(^|[^\r])(\n+)/g, function(match, value, newLines) {
+        for (var i = newLines.length; i--;) {
+          value += '\r\n';
+        }
+        return value;
+      });
+    };
+  }
+
+  // TODO: Shim createHtmlFragment for old IE
+
+  // TODO: Shim setAttribute('style'), which doesn't work in IE <=7
+  // http://webbugtrack.blogspot.com/2007/10/bug-245-setattribute-style-does-not.html
+
+  // TODO: Investigate whether input name attribute works in IE <=7. We could
+  // override Element::appendTo to use IE's alternative createElement syntax:
+  // document.createElement('<input name="xxx">')
+  // http://webbugtrack.blogspot.com/2007/10/bug-235-createelement-is-broken-in-ie.html
+
+  // In IE, input.defaultValue doesn't work correctly, so use input.value,
+  // which mistakenly but conveniently sets both the value property and attribute.
+  //
+  // Surprisingly, in IE <=7, input.defaultChecked must be used instead of
+  // input.checked before the input is in the document.
+  // http://webbugtrack.blogspot.com/2007/11/bug-299-setattribute-checked-does-not.html
+  var input = document.createElement('input');
+  input.defaultValue = 'x';
+  if (input.value !== 'x') {
+    CREATE_PROPERTIES.value = 'value';
+  }
+
+  try {
+    // TextNodes are not expando in IE <=8
+    document.createTextNode('').$try = 0;
+  } catch (err) {
+    setNodeProperty = function(node, key, value) {
+      // If trying to set a property on a TextNode, create a proxy CommentNode
+      // and set the property on that node instead. Put the proxy after the
+      // TextNode if marking the end of a range, and before otherwise.
+      if (node.nodeType === 3) {
+        var proxyNode;
+        if (key === '$bindEnd') {
+          proxyNode = node.nextSibling;
+          if (!proxyNode || proxyNode.$bindProxy !== node) {
+            proxyNode = document.createComment('proxy');
+            proxyNode.$bindProxy = node;
+            node.parentNode.insertBefore(proxyNode, node.nextSibling || null);
+          }
+        } else {
+          proxyNode = node.previousSibling;
+          if (!proxyNode || proxyNode.$bindProxy !== node) {
+            proxyNode = document.createComment('proxy');
+            proxyNode.$bindProxy = node;
+            node.parentNode.insertBefore(proxyNode, node || null);
+          }
+        }
+        return proxyNode[key] = value;
+      }
+      // Set the property directly on other node types
+      return node[key] = value;
+    };
+  }
+})();
+
+},{"serialize-object":38}],38:[function(require,module,exports){
+exports.instance = serializeInstance;
+exports.args = serializeArgs;
+exports.value = serializeValue;
+
+function serializeInstance(instance) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return 'new ' + instance.module + '.' + instance.type +
+    '(' + serializeArgs(args) + ')';
+}
+
+function serializeArgs(args) {
+  // Map each argument into its string representation
+  var items = [];
+  for (var i = args.length; i--;) {
+    var item = serializeValue(args[i]);
+    items.unshift(item);
+  }
+  // Remove trailing null values, assuming they are optional
+  for (var i = items.length; i--;) {
+    var item = items[i];
+    if (item !== 'void 0' && item !== 'null') break;
+    items.pop();
+  }
+  return items.join(', ');
+}
+
+function serializeValue(input) {
+  if (input && input.serialize) {
+    return input.serialize();
+
+  } else if (typeof input === 'undefined') {
+    return 'void 0';
+
+  } else if (input === null) {
+    return 'null';
+
+  } else if (typeof input === 'string') {
+    return formatString(input);
+
+  } else if (typeof input === 'number' || typeof input === 'boolean') {
+    return input + '';
+
+  } else if (Array.isArray(input)) {
+    var items = [];
+    for (var i = 0; i < input.length; i++) {
+      var value = serializeValue(input[i]);
+      items.push(value);
+    }
+    return '[' + items.join(', ') + ']';
+
+  } else if (typeof input === 'object') {
+    var items = [];
+    for (var key in input) {
+      var value = serializeValue(input[key]);
+      items.push(formatString(key) + ': ' + value);
+    }
+    return '{' + items.join(', ') + '}';
+  }
+}
+function formatString(value) {
+  var escaped = value.replace(/['\r\n\\]/g, function(match) {
+    return (match === '\'') ? '\\\'' :
+      (match === '\r') ? '\\r' :
+      (match === '\n') ? '\\n' :
+      (match === '\\') ? '\\\\' :
+      '';
+  });
+  return '\'' + escaped + '\'';
+}
+
+},{}],39:[function(require,module,exports){
 /*
   Copyright (C) 2013 Ariya Hidayat <ariya.hidayat@gmail.com>
   Copyright (C) 2013 Thaddee Tyl <thaddee.tyl@gmail.com>
@@ -8813,2462 +11709,6 @@ parseStatement: true, parseSourceElement: true */
 }));
 /* vim: set sw=4 ts=4 et tw=80 : */
 
-},{}],33:[function(require,module,exports){
-exports.contexts = require('./lib/contexts');
-exports.expressions = require('./lib/expressions');
-exports.operatorFns = require('./lib/operatorFns');
-exports.templates = require('./lib/templates');
-
-},{"./lib/contexts":34,"./lib/expressions":35,"./lib/operatorFns":36,"./lib/templates":37}],34:[function(require,module,exports){
-exports.ContextMeta = ContextMeta;
-exports.Context = Context;
-
-function noop() {}
-
-// TODO:
-// Implement removeItemContext
-
-function ContextMeta() {
-  this.addBinding = noop;
-  this.removeBinding = noop;
-  this.addItemContext = noop;
-  this.removeItemContext = noop;
-  this.views = null;
-  this.idNamespace = '';
-  this.idCount = 0;
-  this.pending = [];
-  this.pauseCount = 0;
-}
-
-function Context(meta, controller, parent, unbound, expression, item, view, attributes, hooks) {
-  // Required properties //
-
-  // Properties which are globally inherited for the entire page
-  this.meta = meta;
-  // The page or component. Must have a `model` property with a `data` property
-  this.controller = controller;
-
-  // Optional properties //
-
-  // Containing context
-  this.parent = parent;
-  // Boolean set to true when bindings should be ignored
-  this.unbound = unbound;
-  // The expression for a block
-  this.expression = expression;
-  // Alias name for the given expression
-  this.alias = expression && expression.meta.as;
-  // Alias name for the index or iterated key
-  this.keyAlias = expression && expression.meta.keyAs;
-
-  // For Context::eachChild
-  // The index of the each at render time
-  this.item = item;
-
-  // For Context::viewChild
-  // Reference to the current view
-  this.view = view;
-  // Attribute values passed to the view instance
-  this.attributes = attributes;
-  // MarkupHooks to be called on create of a component
-  this.hooks = hooks;
-
-  // Used in EventModel
-  this._id = null;
-}
-
-Context.prototype.id = function() {
-  var count = ++this.meta.idCount;
-  return this.meta.idNamespace + '_' + count.toString(36);
-};
-
-Context.prototype.addBinding = function(binding) {
-  // If the template being rendered has an explicit bindType keyword, such as:
-  // {{unbound #item.text}}
-  var expression = binding.template.expression;
-  var bindType = expression && expression.meta && expression.meta.bindType;
-  if (bindType === 'unbound') return;
-  if (bindType === 'bound') return this.meta.addBinding(binding);
-  // Otherwise, inherit binding from the context
-  if (this.unbound) return;
-  this.meta.addBinding(binding);
-};
-Context.prototype.removeBinding = function(binding) {
-  this.meta.removeBinding(binding);
-};
-
-Context.prototype.child = function(expression) {
-  // Set or inherit the binding mode
-  var blockType = expression.meta.blockType;
-  var unbound = (blockType === 'unbound') ? true :
-    (blockType === 'bound') ? false :
-    this.unbound;
-  return new Context(this.meta, this.controller, this, unbound, expression);
-};
-
-Context.prototype.componentChild = function(component) {
-  return new Context(this.meta, component, this, this.unbound);
-};
-
-// Make a context for an item in an each block
-Context.prototype.eachChild = function(index) {
-  var context = new Context(this.meta, this.controller, this, this.unbound, this.expression, index);
-  this.meta.addItemContext(context);
-  return context;
-};
-
-Context.prototype.viewChild = function(view, attributes, hooks) {
-  return new Context(this.meta, this.controller, this, this.unbound, null, null, view, attributes, hooks);
-};
-
-Context.prototype.forRelative = function(expression) {
-  return (expression.meta && expression.meta.blockType) ? this.parent : this;
-};
-
-// Returns the closest context which defined the named alias
-Context.prototype.forAlias = function(alias) {
-  var context = this;
-  while (context) {
-    if (context.alias === alias || context.keyAlias === alias) return context;
-    context = context.parent;
-  }
-};
-
-// Returns the closest containing context for a view attribute name or nothing
-Context.prototype.forAttribute = function(attribute) {
-  var context = this;
-  while (context) {
-    // Find the closest context associated with a view
-    if (context.view) {
-      var attributes = context.attributes;
-      if (!attributes) return;
-      if (attributes.hasOwnProperty(attribute)) return context;
-      // If the attribute isn't found, but the attributes inherit, continue
-      // looking in the next closest view context
-      if (!attributes.inherit) return;
-    }
-    context = context.parent;
-  }
-};
-
-Context.prototype.forViewParent = function() {
-  var context = this;
-  while (context) {
-    // Find the closest view
-    if (context.view) return context.parent;
-    context = context.parent;
-  }
-};
-
-Context.prototype.getView = function() {
-  var context = this;
-  while (context) {
-    // Find the closest view
-    if (context.view) return context.view;
-    context = context.parent;
-  }
-};
-
-// Returns the `this` value for a context
-Context.prototype.get = function() {
-  return (this.expression) ? this.expression.get(this) : this.controller.model.data;
-};
-
-Context.prototype.pause = function() {
-  this.meta.pauseCount++;
-};
-
-Context.prototype.unpause = function() {
-  if (--this.meta.pauseCount) return;
-  this.flush();
-};
-
-Context.prototype.flush = function() {
-  var pending = this.meta.pending;
-  var len = pending.length;
-  if (!len) return;
-  this.meta.pending = [];
-  for (var i = 0; i < len; i++) {
-    pending[i].run();
-  }
-};
-
-Context.prototype.queueCreate = function(object) {
-  this.meta.pending.push(new PendingCreate(object, this));
-};
-
-function PendingCreate(object, context) {
-  this.object = object;
-  this.context = context;
-}
-PendingCreate.prototype.run = function() {
-  this.object.create(this.context);
-};
-
-},{}],35:[function(require,module,exports){
-var serializeObject = require('serialize-object');
-var operatorFns = require('./operatorFns');
-var templates = require('./templates');
-
-exports.lookup = lookup;
-exports.templateTruthy = templateTruthy;
-exports.pathSegments = pathSegments;
-exports.renderValue = renderValue;
-exports.ExpressionMeta = ExpressionMeta;
-
-exports.Expression = Expression;
-exports.LiteralExpression = LiteralExpression;
-exports.PathExpression = PathExpression;
-exports.RelativePathExpression = RelativePathExpression;
-exports.AliasPathExpression = AliasPathExpression;
-exports.AttributePathExpression = AttributePathExpression;
-exports.BracketsExpression = BracketsExpression;
-exports.FnExpression = FnExpression;
-exports.OperatorExpression = OperatorExpression;
-exports.NewExpression = NewExpression;
-exports.SequenceExpression = SequenceExpression;
-
-function lookup(segments, value) {
-  if (!segments) return value;
-
-  for (var i = 0, len = segments.length; i < len; i++) {
-    if (value == null) return value;
-    value = value[segments[i]];
-  }
-  return value;
-}
-
-// Unlike JS, `[]` is falsey. Otherwise, truthiness is the same as JS
-function templateTruthy(value) {
-  return (Array.isArray(value)) ? value.length > 0 : !!value;
-}
-
-function pathSegments(segments) {
-  var result = [];
-  for (var i = 0; i < segments.length; i++) {
-    var segment = segments[i];
-    result[i] = (typeof segment === 'object') ? segment.item : segment;
-  }
-  return result;
-}
-
-function renderValue(value, context) {
-  return (typeof value !== 'object') ? value :
-    (value instanceof templates.Template) ? value.get(context, true) :
-    (Array.isArray(value)) ? renderArray(value, context) :
-    renderObject(value, context);
-}
-function renderArray(array, context) {
-  for (var i = 0, len = array.length; i < len; i++) {
-    if (hasTemplateProperty(array[i])) {
-      return renderArrayProperties(array, context);
-    }
-  }
-  return array;
-}
-function renderObject(object, context) {
-  return (hasTemplateProperty(object)) ?
-    renderObjectProperties(object, context) : object;
-}
-function hasTemplateProperty(object) {
-  if (typeof object !== 'object') return false;
-  for (var key in object) {
-    if (object[key] instanceof templates.Template) return true;
-  }
-  return false;
-}
-function renderArrayProperties(array, context) {
-  var out = [];
-  for (var i = 0, len = array.length; i < len; i++) {
-    var item = renderObject(array[i], context);
-    out.push(item);
-  }
-  return out;
-}
-function renderObjectProperties(object, context) {
-  var out = {};
-  for (var key in object) {
-    var value = object[key];
-    out[key] = (value instanceof templates.Template) ?
-      value.get(context, true) : value;
-  }
-  return out;
-}
-
-function ExpressionMeta(source, blockType, isEnd, as, keyAs, unescaped, bindType, valueType) {
-  this.source = source;
-  this.blockType = blockType;
-  this.isEnd = isEnd;
-  this.as = as;
-  this.keyAs = keyAs;
-  this.unescaped = unescaped;
-  this.bindType = bindType;
-  this.valueType = valueType;
-}
-ExpressionMeta.prototype.module = 'expressions';
-ExpressionMeta.prototype.type = 'ExpressionMeta';
-ExpressionMeta.prototype.serialize = function() {
-  return serializeObject.instance(
-    this
-  , this.source
-  , this.blockType
-  , this.isEnd
-  , this.as
-  , this.keyAs
-  , this.unescaped
-  , this.bindType
-  , this.valueType
-  );
-};
-
-function Expression(meta) {
-  this.meta = meta;
-}
-Expression.prototype.module = 'expressions';
-Expression.prototype.type = 'Expression';
-Expression.prototype.serialize = function() {
-  return serializeObject.instance(this, this.meta);
-};
-Expression.prototype.toString = function() {
-  return this.meta && this.meta.source;
-};
-Expression.prototype.truthy = function(context) {
-  var blockType = this.meta.blockType;
-  if (blockType === 'else') return true;
-  var value = this.get(context, true);
-  var truthy = templateTruthy(value);
-  return (blockType === 'unless') ? !truthy : truthy;
-};
-Expression.prototype.get = function() {};
-// Return the expression's segment list with context objects
-Expression.prototype.resolve = function() {};
-// Return a list of segment lists or null
-Expression.prototype.dependencies = function() {};
-// Return the pathSegments that the expression currently resolves to or null
-Expression.prototype.pathSegments = function(context) {
-  var segments = this.resolve(context);
-  return segments && pathSegments(segments);
-};
-Expression.prototype.set = function(context, value) {
-  var segments = this.pathSegments(context);
-  if (!segments) throw new Error('Expression does not support setting');
-  context.controller.model._set(segments, value);
-};
-Expression.prototype._getPatch = function(context, value) {
-  if (this.meta && this.meta.blockType && value instanceof templates.Template) {
-    value = value.get(context, true);
-  }
-  return (context && context.expression === this && context.item != null) ?
-    value && value[context.item] : value;
-};
-Expression.prototype._resolvePatch = function(context, segments) {
-  return (context && context.expression === this && context.item != null) ?
-    segments.concat(context) : segments;
-};
-
-
-function LiteralExpression(value, meta) {
-  this.value = value;
-  this.meta = meta;
-}
-LiteralExpression.prototype = new Expression();
-LiteralExpression.prototype.type = 'LiteralExpression';
-LiteralExpression.prototype.serialize = function() {
-  return serializeObject.instance(this, this.value, this.meta);
-};
-LiteralExpression.prototype.get = function(context) {
-  return this._getPatch(context, this.value);
-};
-
-function PathExpression(segments, meta) {
-  this.segments = segments;
-  this.meta = meta;
-}
-PathExpression.prototype = new Expression();
-PathExpression.prototype.type = 'PathExpression';
-PathExpression.prototype.serialize = function() {
-  return serializeObject.instance(this, this.segments, this.meta);
-};
-PathExpression.prototype.get = function(context) {
-  var value = lookup(this.segments, context.controller.model.data);
-  return this._getPatch(context, value);
-};
-PathExpression.prototype.resolve = function(context) {
-  var segments = concat(context.controller._scope, this.segments);
-  return this._resolvePatch(context, segments);
-};
-PathExpression.prototype.dependencies = function(context, forInnerPath) {
-  return outerDependency(this, context, forInnerPath);
-};
-
-function RelativePathExpression(segments, meta) {
-  this.segments = segments;
-  this.meta = meta;
-}
-RelativePathExpression.prototype = new Expression();
-RelativePathExpression.prototype.type = 'RelativePathExpression';
-RelativePathExpression.prototype.serialize = function() {
-  return serializeObject.instance(this, this.segments, this.meta);
-};
-RelativePathExpression.prototype.get = function(context) {
-  var relativeContext = context.forRelative(this);
-  var value = relativeContext.get();
-  if (this.segments.length) {
-    if (value instanceof templates.Template) value = value.get(relativeContext, true);
-    value = lookup(this.segments, value);
-  }
-  return this._getPatch(context, value);
-};
-RelativePathExpression.prototype.resolve = function(context) {
-  var relativeContext = context.forRelative(this);
-  var base = (relativeContext.expression) ?
-    relativeContext.expression.resolve(relativeContext) :
-    [];
-  if (!base) return;
-  var segments = base.concat(this.segments);
-  return this._resolvePatch(relativeContext, segments);
-};
-RelativePathExpression.prototype.dependencies = function(context, forInnerPath) {
-  // Return inner dependencies from our ancestor
-  // (e.g., {{ with foo[bar] }} ... {{ this.x }} has 'bar' as a dependency.)
-  var relativeContext = context.forRelative(this);
-  var inner = relativeContext.expression &&
-    relativeContext.expression.dependencies(relativeContext, true);
-  var outer = outerDependency(this, context, forInnerPath);
-  return concat(outer, inner);
-};
-
-function AliasPathExpression(alias, segments, meta) {
-  this.alias = alias;
-  this.segments = segments;
-  this.meta = meta;
-}
-AliasPathExpression.prototype = new Expression();
-AliasPathExpression.prototype.type = 'AliasPathExpression';
-AliasPathExpression.prototype.serialize = function() {
-  return serializeObject.instance(this, this.alias, this.segments, this.meta);
-};
-AliasPathExpression.prototype.get = function(context) {
-  var aliasContext = context.forAlias(this.alias);
-  if (!aliasContext) return;
-  if (aliasContext.keyAlias === this.alias) {
-    return aliasContext.item;
-  }
-  var value = aliasContext.get();
-  if (this.segments.length) {
-    if (value instanceof templates.Template) value = value.get(aliasContext, true);
-    value = lookup(this.segments, value);
-  }
-  return this._getPatch(context, value);
-};
-AliasPathExpression.prototype.resolve = function(context) {
-  var aliasContext = context.forAlias(this.alias);
-  if (!aliasContext) return;
-  if (aliasContext.keyAlias === this.alias) return;
-  var base = aliasContext.expression.resolve(aliasContext);
-  if (!base) return;
-  var segments = base.concat(this.segments);
-  return this._resolvePatch(context, segments);
-};
-AliasPathExpression.prototype.dependencies = function(context, forInnerPath) {
-  var aliasContext = context.forAlias(this.alias);
-  if (!aliasContext) return;
-  var inner = aliasContext.expression.dependencies(aliasContext, true);
-  var outer = (aliasContext.keyAlias === this.alias) ?
-    // For keyAliases, use a dependency of the entire list, so that it will
-    // always update when the list changes in any way. This is over-binding,
-    // but this would otherwise need complex special casing
-    outerDependency(aliasContext.parent.expression, aliasContext.parent, forInnerPath) :
-    outerDependency(this, context, forInnerPath);
-  return concat(outer, inner);
-};
-
-function AttributePathExpression(attribute, segments, meta) {
-  this.attribute = attribute;
-  this.segments = segments;
-  this.meta = meta;
-}
-AttributePathExpression.prototype = new Expression();
-AttributePathExpression.prototype.type = 'AttributePathExpression';
-AttributePathExpression.prototype.serialize = function() {
-  return serializeObject.instance(this, this.attribute, this.segments, this.meta);
-};
-AttributePathExpression.prototype.get = function(context) {
-  var attributeContext = context.forAttribute(this.attribute);
-  if (!attributeContext) return;
-  var value = attributeContext.attributes[this.attribute];
-  if (this.segments.length) {
-    if (value instanceof templates.Template) value = value.get(attributeContext, true);
-    value = lookup(this.segments, value);
-  }
-  return this._getPatch(context, value);
-};
-AttributePathExpression.prototype.resolve = function(context) {
-  var attributeContext = context.forAttribute(this.attribute);
-  // Attributes are either a ParentWrapper or a literal value
-  var value = attributeContext && attributeContext.attributes[this.attribute];
-  var base = value && (typeof value.resolve === 'function') &&
-    value.resolve(attributeContext);
-  if (!base) return;
-  var segments = base.concat(this.segments);
-  return this._resolvePatch(context, segments);
-};
-AttributePathExpression.prototype.dependencies = function(context, forInnerPath) {
-  var attributeContext = context.forAttribute(this.attribute);
-  // Attributes are either a ParentWrapper or a literal value
-  var value = attributeContext && attributeContext.attributes[this.attribute];
-  var inner = value && (typeof value.dependencies === 'function') &&
-    value.dependencies(attributeContext, true);
-  var outer = outerDependency(this, context, forInnerPath);
-  return concat(outer, inner);
-};
-
-function BracketsExpression(before, inside, afterSegments, meta) {
-  this.before = before;
-  this.inside = inside;
-  this.afterSegments = afterSegments;
-  this.meta = meta;
-}
-BracketsExpression.prototype = new Expression();
-BracketsExpression.prototype.type = 'BracketsExpression';
-BracketsExpression.prototype.serialize = function() {
-  return serializeObject.instance(this, this.before, this.inside, this.afterSegments, this.meta);
-};
-BracketsExpression.prototype.get = function(context) {
-  var inside = this.inside.get(context);
-  if (inside == null) return;
-  var before = this.before.get(context);
-  if (!before) return;
-  var base = before[inside];
-  var value = (this.afterSegments) ? lookup(this.afterSegments, base) : base;
-  return this._getPatch(context, value);
-};
-BracketsExpression.prototype.resolve = function(context) {
-  // Get and split the current value of the expression inside the brackets
-  var inside = this.inside.get(context);
-  if (inside == null) return;
-
-  // Concat the before, inside, and optional after segments
-  var base = this.before.resolve(context);
-  if (!base) return;
-  var segments = (this.afterSegments) ?
-    base.concat(inside, this.afterSegments) :
-    base.concat(inside);
-  return this._resolvePatch(context, segments);
-};
-BracketsExpression.prototype.dependencies = function(context, forInnerPath) {
-  var before = this.before.dependencies(context, true);
-  var inner = this.inside.dependencies(context);
-  var outer = outerDependency(this, context, forInnerPath);
-  return concat(concat(outer, inner), before);
-};
-
-function FnExpression(segments, args, afterSegments, meta) {
-  this.segments = segments;
-  this.args = args;
-  this.afterSegments = afterSegments;
-  this.meta = meta;
-  var parentSegments = segments && segments.slice();
-  this.lastSegment = parentSegments && parentSegments.pop();
-  this.parentSegments = (parentSegments && parentSegments.length) ? parentSegments : null;
-}
-FnExpression.prototype = new Expression();
-FnExpression.prototype.type = 'FnExpression';
-FnExpression.prototype.serialize = function() {
-  return serializeObject.instance(this, this.segments, this.args, this.afterSegments, this.meta);
-};
-FnExpression.prototype.get = function(context) {
-  var value = this.apply(context);
-  // Lookup property underneath computed value if needed
-  if (this.afterSegments) {
-    value = lookup(this.afterSegments, value);
-  }
-  return this._getPatch(context, value);
-};
-FnExpression.prototype.apply = function(context, extraInputs, modelExtras) {
-  var controller = context.controller;
-  var fn, parent;
-  while (controller) {
-    parent = (this.parentSegments) ?
-      lookup(this.parentSegments, controller) :
-      controller;
-    fn = parent && parent[this.lastSegment];
-    if (fn) break;
-    controller = controller.parent;
-  }
-  if (!fn) throw new Error('Function not found for: ' + this.segments.join('.'));
-  var getFn = fn.get || fn;
-  if (modelExtras) {
-    for (var key in modelExtras) {
-      context.controller.model.data[key] = modelExtras[key];
-    }
-  }
-  var out = this._applyFn(getFn, context, extraInputs, parent);
-  if (modelExtras) {
-    for (var key in modelExtras) {
-      delete context.controller.model.data[key];
-    }
-  }
-  return out;
-};
-FnExpression.prototype._getInputs = function(context) {
-  var inputs = [];
-  for (var i = 0, len = this.args.length; i < len; i++) {
-    var value = this.args[i].get(context);
-    inputs.push(renderValue(value, context));
-  }
-  return inputs;
-};
-FnExpression.prototype._applyFn = function(fn, context, extraInputs, thisArg) {
-  // Apply if there are no path inputs
-  if (!this.args) {
-    return (extraInputs) ?
-      fn.apply(thisArg, extraInputs) :
-      fn.call(thisArg);
-  }
-  // Otherwise, get the current value for path inputs and apply
-  var inputs = this._getInputs(context);
-  if (extraInputs) {
-    for (var i = 0, len = extraInputs.length; i < len; i++) {
-      inputs.push(extraInputs[i]);
-    }
-  }
-  return fn.apply(thisArg, inputs);
-};
-FnExpression.prototype.dependencies = function(context) {
-  var dependencies = [];
-  if (!this.args) return dependencies;
-  for (var i = 0, len = this.args.length; i < len; i++) {
-    var argDependencies = this.args[i].dependencies(context);
-    var firstDependency = argDependencies && argDependencies[0];
-    if (!firstDependency) continue;
-    if (firstDependency[firstDependency.length - 1] !== '*') {
-      argDependencies[0] = argDependencies[0].concat('*');
-    }
-    for (var j = 0, jLen = argDependencies.length; j < jLen; j++) {
-      dependencies.push(argDependencies[j]);
-    }
-  }
-  return dependencies;
-};
-FnExpression.prototype.set = function(context, value) {
-  var controller = context.controller;
-  var fn, parent;
-  while (controller) {
-    parent = (this.parentSegments) ?
-      lookup(this.parentSegments, controller) :
-      controller;
-    fn = parent && parent[this.lastSegment];
-    if (fn) break;
-    controller = controller.parent;
-  }
-  var setFn = fn && fn.set;
-  if (!setFn) throw new Error('No setter function for: ' + this.segments.join('.'));
-  var inputs = this._getInputs(context);
-  inputs.unshift(value);
-  var out = setFn.apply(parent, inputs);
-  for (var i in out) {
-    this.args[i].set(context, out[i]);
-  }
-};
-
-function NewExpression(segments, args, afterSegments, meta) {
-  FnExpression.call(this, segments, args, afterSegments, meta);
-}
-NewExpression.prototype = new FnExpression();
-NewExpression.prototype.type = 'NewExpression';
-NewExpression.prototype._applyFn = function(Fn, context) {
-  // Apply if there are no path inputs
-  if (!this.args) return new Fn();
-  // Otherwise, get the current value for path inputs and apply
-  var inputs = this._getInputs(context);
-  inputs.unshift(null);
-  return new (Fn.bind.apply(Fn, inputs))();
-};
-
-function OperatorExpression(name, args, afterSegments, meta) {
-  this.name = name;
-  this.args = args;
-  this.afterSegments = afterSegments;
-  this.meta = meta;
-  this.getFn = operatorFns.get[name];
-  this.setFn = operatorFns.set[name];
-}
-OperatorExpression.prototype = new FnExpression();
-OperatorExpression.prototype.type = 'OperatorExpression';
-OperatorExpression.prototype.serialize = function() {
-  return serializeObject.instance(this, this.name, this.args, this.afterSegments, this.meta);
-};
-OperatorExpression.prototype.apply = function(context) {
-  var inputs = this._getInputs(context);
-  return this.getFn.apply(null, inputs);
-};
-OperatorExpression.prototype.set = function(context, value) {
-  var inputs = this._getInputs(context);
-  inputs.unshift(value);
-  var out = this.setFn.apply(null, inputs);
-  for (var i in out) {
-    this.args[i].set(context, out[i]);
-  }
-};
-
-function SequenceExpression(args, afterSegments, meta) {
-  this.args = args;
-  this.afterSegments = afterSegments;
-  this.meta = meta;
-}
-SequenceExpression.prototype = new OperatorExpression();
-SequenceExpression.prototype.type = 'SequenceExpression';
-SequenceExpression.prototype.serialize = function() {
-  return serializeObject.instance(this, this.args, this.afterSegments, this.meta);
-};
-SequenceExpression.prototype.name = ',';
-SequenceExpression.prototype.getFn = operatorFns.get[','];
-SequenceExpression.prototype.resolve = function(context) {
-  var last = this.args[this.args.length - 1];
-  return last.resolve(context);
-};
-SequenceExpression.prototype.dependencies = function(context, forInnerPath) {
-  var last = this.args[this.args.length - 1];
-  return last.dependencies(context, forInnerPath);
-};
-
-function outerDependency(expression, context, forInnerPath) {
-  if (forInnerPath) return;
-  return [expression.resolve(context)];
-}
-
-function concat(a, b) {
-  if (!a) return b;
-  if (!b) return a;
-  return a.concat(b);
-}
-
-},{"./operatorFns":36,"./templates":37,"serialize-object":39}],36:[function(require,module,exports){
-// `-` and `+` can be either unary or binary, so all unary operators are
-// postfixed with `U` to differentiate
-
-exports.get = {
-  // Unary operators
-  '!U': function(value) {
-    return !value;
-  }
-, '-U': function(value) {
-    return -value;
-  }
-, '+U': function(value) {
-    return +value;
-  }
-, '~U': function(value) {
-    return ~value;
-  }
-, 'typeofU': function(value) {
-    return typeof value;
-  }
-  // Binary operators
-, '||': function(left, right) {
-    return left || right;
-  }
-, '&&': function(left, right) {
-    return left && right;
-  }
-, '|': function(left, right) {
-    return left | right;
-  }
-, '^': function(left, right) {
-    return left ^ right;
-  }
-, '&': function(left, right) {
-    return left & right;
-  }
-, '==': function(left, right) {
-    return left == right; // jshint ignore:line
-  }
-, '!=': function(left, right) {
-    return left != right; // jshint ignore:line
-  }
-, '===': function(left, right) {
-    return left === right;
-  }
-, '!==': function(left, right) {
-    return left !== right;
-  }
-, '<': function(left, right) {
-    return left < right;
-  }
-, '>': function(left, right) {
-    return left > right;
-  }
-, '<=': function(left, right) {
-    return left <= right;
-  }
-, '>=': function(left, right) {
-    return left >= right;
-  }
-, 'instanceof': function(left, right) {
-    return left instanceof right;
-  }
-, 'in': function(left, right) {
-    return left in right;
-  }
-, '<<': function(left, right) {
-    return left << right;
-  }
-, '>>': function(left, right) {
-    return left >> right;
-  }
-, '>>>': function(left, right) {
-    return left >>> right;
-  }
-, '+': function(left, right) {
-    return left + right;
-  }
-, '-': function(left, right) {
-    return left - right;
-  }
-, '*': function(left, right) {
-    return left * right;
-  }
-, '/': function(left, right) {
-    return left / right;
-  }
-, '%': function(left, right) {
-    return left % right;
-  }
-  // Conditional operator
-, '?': function(test, consequent, alternate) {
-    return (test) ? consequent : alternate;
-  }
-, // Sequence
-  ',': function() {
-    return arguments[arguments.length - 1];
-  }
-  // Array literal
-, '[]': function() {
-    return Array.prototype.slice.call(arguments);
-  }
-  // Object literal
-, '{}': function() {
-    var value = {};
-    for (var i = 0, len = arguments.length; i < len; i += 2) {
-      var key = arguments[i];
-      value[key] = arguments[i + 1];
-    }
-    return value;
-  }
-};
-
-exports.set = {
-  // Unary operators
-  '!U': function(value) {
-    return [!value];
-  }
-, '-U': function(value) {
-    return [-value];
-  }
-  // Binary operators
-, '==': function(value, left, right) {
-    if (value) return [right];
-  }
-, '===': function(value, left, right) {
-    if (value) return [right];
-  }
-, 'in': function(value, left, right) {
-    right[left] = true;
-    return {1: right};
-  }
-, '+': function(value, left, right) {
-    return [value - right];
-  }
-, '-': function(value, left, right) {
-    return [value + right];
-  }
-, '*': function(value, left, right) {
-    return [value / right];
-  }
-, '/': function(value, left, right) {
-    return [value * right];
-  }
-};
-
-},{}],37:[function(require,module,exports){
-var saddle = require('saddle');
-var serializeObject = require('serialize-object');
-
-(function() {
-  for (var key in saddle) {
-    exports[key] = saddle[key];
-  }
-})();
-
-exports.View = View;
-exports.ViewInstance = ViewInstance;
-exports.DynamicViewInstance = DynamicViewInstance;
-exports.ParentWrapper = ParentWrapper;
-
-exports.Views = Views;
-
-exports.MarkupHook = MarkupHook;
-exports.ElementOn = ElementOn;
-exports.ComponentOn = ComponentOn;
-exports.MarkupAs = MarkupAs;
-
-exports.emptyTemplate = new saddle.Template([]);
-
-// Add Template::resolve
-saddle.Template.prototype.resolve = function() {};
-
-// The Template::dependencies method is specific to how Derby bindings work,
-// so extend all of the Saddle Template types here
-saddle.Template.prototype.dependencies = function(context) {
-  return getArrayDependencies(this.content, context);
-};
-saddle.Doctype.prototype.dependencies = function() {};
-saddle.Text.prototype.dependencies = function() {};
-saddle.DynamicText.prototype.dependencies = function(context) {
-  return getDependencies(this.expression, context);
-};
-saddle.Comment.prototype.dependencies = function() {};
-saddle.DynamicComment.prototype.dependencies = function(context) {
-  return getDependencies(this.expression, context);
-};
-saddle.Element.prototype.dependencies = function(context) {
-  var items = getMapDependencies(this.attributes, context);
-  return getArrayDependencies(this.content, context, items);
-};
-saddle.Block.prototype.dependencies = function(context) {
-  var items = getDependencies(this.expression, context);
-  return getArrayDependencies(this.content, context, items);
-};
-saddle.ConditionalBlock.prototype.dependencies = function(context) {
-  var items = getArrayDependencies(this.expressions, context);
-  return getArrayOfArrayDependencies(this.contents, context, items);
-};
-saddle.EachBlock.prototype.dependencies = function(context) {
-  var items = getDependencies(this.expression, context);
-  items = getArrayDependencies(this.content, context, items);
-  return getArrayDependencies(this.elseContent, context, items);
-};
-saddle.Attribute.prototype.dependencies = function() {};
-saddle.DynamicAttribute.prototype.dependencies = function(context) {
-  return getDependencies(this.expression, context);
-};
-
-function getArrayOfArrayDependencies(expressions, context, items) {
-  if (!expressions) return items;
-  for (var i = 0, len = expressions.length; i < len; i++) {
-    items = getArrayDependencies(expressions[i], context, items);
-  }
-  return items;
-}
-function getArrayDependencies(expressions, context, items) {
-  if (!expressions) return items;
-  for (var i = 0, len = expressions.length; i < len; i++) {
-    items = getDependencies(expressions[i], context, items);
-  }
-  return items;
-}
-function getMapDependencies(expressions, context, items) {
-  if (!expressions) return items;
-  for (var key in expressions) {
-    items = getDependencies(expressions[key], context, items);
-  }
-  return items;
-}
-function getDependencies(expression, context, items) {
-  var dependencies = expression && expression.dependencies(context);
-  if (!dependencies) return items;
-  for (var i = 0, len = dependencies.length; i < len; i++) {
-    items || (items = []);
-    items.push(dependencies[i]);
-  }
-  return items;
-}
-
-function ViewAttributesMap(source) {
-  var items = source.split(/\s+/);
-  for (var i = 0, len = items.length; i < len; i++) {
-    this[items[i]] = true;
-  }
-}
-function ViewArraysMap(source) {
-  var items = source.split(/\s+/);
-  for (var i = 0, len = items.length; i < len; i++) {
-    var item = items[i].split('/');
-    this[item[0]] = item[1] || item[0];
-  }
-}
-function View(views, name, source, options) {
-  this.views = views;
-  this.name = name;
-  this.source = source;
-  this.options = options;
-
-  var nameSegments = (this.name || '').split(':');
-  var lastSegment = nameSegments.pop();
-  this.namespace = nameSegments.join(':');
-  this.registeredName = (lastSegment === 'index') ? this.namespace : this.name;
-
-  this.attributesMap = options && options.attributes &&
-    new ViewAttributesMap(options.attributes);
-  this.arraysMap = options && options.arrays &&
-    new ViewArraysMap(options.arrays);
-  // The empty string is considered true for easier HTML attribute parsing
-  this.unminified = options && (options.unminified || options.unminified === '');
-  this.string = options && (options.string || options.string === '');
-  this.template = null;
-  this.componentFactory = null;
-}
-View.prototype = new saddle.Template();
-View.prototype.type = 'View';
-View.prototype.serialize = function(options) {
-  var template = this.template || this._parse();
-  return 'views.register(' + serializeObject.args([
-      this.name
-    , (options && options.minify) ? null : this.source
-    , (hasKeys(this.options)) ? this.options : null
-    ]) + ').template = ' + template.serialize() + ';';
-};
-View.prototype.get = function(context, unescaped) {
-  if (this.componentFactory) context = this.componentFactory.init(context);
-  var template = this.template || this._parse();
-  return template.get(context, unescaped);
-};
-View.prototype.getFragment = function(context, binding) {
-  if (this.componentFactory) context = this.componentFactory.init(context);
-  var template = this.template || this._parse();
-  var fragment = template.getFragment(context, binding);
-  if (this.componentFactory) context.queueCreate(this.componentFactory);
-  return fragment;
-};
-View.prototype.appendTo = function(parent, context) {
-  if (this.componentFactory) context = this.componentFactory.init(context);
-  var template = this.template || this._parse();
-  template.appendTo(parent, context);
-  if (this.componentFactory) context.queueCreate(this.componentFactory);
-};
-View.prototype.attachTo = function(parent, node, context) {
-  if (this.componentFactory) context = this.componentFactory.init(context);
-  var template = this.template || this._parse();
-  var node = template.attachTo(parent, node, context);
-  if (this.componentFactory) context.queueCreate(this.componentFactory);
-  return node;
-};
-View.prototype.dependencies = function(context) {
-  var template = this.template || this._parse();
-  return template.dependencies(context);
-};
-// View.prototype._parse is defined in parsing.js, so that it doesn't have to
-// be included in the client if templates are all parsed server-side
-View.prototype._parse = function() {
-  throw new Error('View parsing not available');
-};
-
-function ViewInstance(name, attributes, hooks) {
-  this.name = name;
-  this.attributes = attributes;
-  this.hooks = hooks;
-  this.view = null;
-}
-ViewInstance.prototype = new saddle.Template();
-ViewInstance.prototype.type = 'ViewInstance';
-ViewInstance.prototype.serialize = function() {
-  return serializeObject.instance(this, this.name, this.attributes, this.hooks);
-};
-ViewInstance.prototype.get = function(context, unescaped) {
-  var view = this._find(context);
-  var viewContext = context.viewChild(view, this.attributes, this.hooks);
-  return view.get(viewContext, unescaped);
-};
-ViewInstance.prototype.getFragment = function(context, binding) {
-  var view = this._find(context);
-  var viewContext = context.viewChild(view, this.attributes, this.hooks);
-  return view.getFragment(viewContext, binding);
-};
-ViewInstance.prototype.appendTo = function(parent, context) {
-  var view = this._find(context);
-  var viewContext = context.viewChild(view, this.attributes, this.hooks);
-  view.appendTo(parent, viewContext);
-};
-ViewInstance.prototype.attachTo = function(parent, node, context) {
-  var view = this._find(context);
-  var viewContext = context.viewChild(view, this.attributes, this.hooks);
-  return view.attachTo(parent, node, viewContext);
-};
-ViewInstance.prototype.dependencies = function(context) {
-  var view = this._find(context);
-  var viewContext = context.viewChild(view, this.attributes, this.hooks);
-  return view.dependencies(viewContext);
-};
-ViewInstance.prototype._find = function(context) {
-  if (this.view) return this.view;
-  var contextView = context.getView();
-  var namespace = contextView && contextView.namespace;
-  this.view = context.meta.views.find(this.name, namespace);
-  if (!this.view) {
-    var message = context.meta.views.findErrorMessage(this.name, contextView);
-    throw new Error(message);
-  }
-  return this.view;
-};
-
-function DynamicViewInstance(nameExpression, attributes, hooks) {
-  this.nameExpression = nameExpression;
-  this.attributes = attributes;
-  this.hooks = hooks;
-  this.optional = attributes && attributes.optional;
-}
-DynamicViewInstance.prototype = new ViewInstance();
-DynamicViewInstance.prototype.type = 'DynamicViewInstance';
-DynamicViewInstance.prototype.serialize = function() {
-  return serializeObject.instance(this, this.nameExpression, this.attributes, this.hooks);
-};
-DynamicViewInstance.prototype._find = function(context) {
-  var name = this.nameExpression.get(context);
-  var contextView = context.getView();
-  var namespace = contextView && contextView.namespace;
-  var view = name && context.meta.views.find(name, namespace);
-  if (!view) {
-    if (this.optional) return exports.emptyTemplate;
-    var message = context.meta.views.findErrorMessage(name, contextView);
-    throw new Error(message);
-  }
-  return view;
-};
-
-function ParentWrapper(template, expression) {
-  this.template = template;
-  this.expression = expression;
-}
-ParentWrapper.prototype = new saddle.Template();
-ParentWrapper.prototype.type = 'ParentWrapper';
-ParentWrapper.prototype.serialize = function() {
-  return serializeObject.instance(this, this.template, this.expression);
-};
-ParentWrapper.prototype.get = function(context, unescaped) {
-  return (this.expression || this.template).get(context.forViewParent(), unescaped);
-};
-ParentWrapper.prototype.getFragment = function(context, binding) {
-  return this.template.getFragment(context.forViewParent(), binding);
-};
-ParentWrapper.prototype.appendTo = function(parent, context) {
-  this.template.appendTo(parent, context.forViewParent());
-};
-ParentWrapper.prototype.attachTo = function(parent, node, context) {
-  return this.template.attachTo(parent, node, context.forViewParent());
-};
-ParentWrapper.prototype.resolve = function(context) {
-  return this.expression && this.expression.resolve(context.forViewParent());
-};
-ParentWrapper.prototype.dependencies = function(context) {
-  return (this.expression || this.template).dependencies(context.forViewParent());
-};
-
-function ViewsMap() {}
-function Views() {
-  this.nameMap = new ViewsMap();
-  this.elementMap = new ViewsMap();
-}
-Views.prototype.find = function(name, namespace) {
-  var map = this.nameMap;
-
-  // Exact match lookup
-  var exactName = (namespace) ? namespace + ':' + name : name;
-  var match = map[exactName];
-  if (match) return match;
-
-  // Relative lookup
-  var segments = name.split(':');
-  var segmentsDepth = segments.length;
-  if (namespace) segments = namespace.split(':').concat(segments);
-  // Iterate through segments, leaving the `segmentsDepth` segments and
-  // removing the second to `segmentsDepth` segment to traverse up the
-  // namespaces. Decrease `segmentsDepth` if not found and repeat again.
-  while (segmentsDepth > 0) {
-    while (segments.length > segmentsDepth) {
-      segments.splice(-1 - segmentsDepth, 1);
-      var testName = segments.join(':');
-      var match = map[testName];
-      if (match) return match;
-    }
-    segmentsDepth--;
-  }
-};
-Views.prototype.register = function(name, source, options) {
-  var mapName = name.replace(/:index$/, '');
-  var view = this.nameMap[mapName];
-  if (view) {
-    // Recreate the view if it already exists. We re-apply the constructor
-    // instead of creating a new view object so that references to object
-    // can be cached after finding the first time
-    var componentFactory = view.componentFactory;
-    View.call(view, this, name, source, options);
-    view.componentFactory = componentFactory;
-  } else {
-    view = new View(this, name, source, options);
-  }
-  this.nameMap[mapName] = view;
-  if (options && options.element) this.elementMap[options.element] = view;
-  return view;
-};
-Views.prototype.serialize = function(options) {
-  var out = 'function(derbyTemplates, views) {' +
-    'var expressions = derbyTemplates.expressions;' +
-    'var templates = derbyTemplates.templates;';
-  for (var name in this.nameMap) {
-    out += this.nameMap[name].serialize(options);
-  }
-  return out + '}';
-};
-Views.prototype.findErrorMessage = function(name, contextView) {
-  var names = Object.keys(this.nameMap);
-  var message = 'Cannot find view "' + name + '" in' +
-    [''].concat(names).join('\n  ') + '\n';
-  if (contextView) {
-    message += '\nWithin template "' + contextView.name + '":\n' + contextView.source;
-  }
-  return message;
-};
-
-
-function MarkupHook() {}
-MarkupHook.prototype.module = saddle.Template.prototype.module;
-
-function ElementOn(name, expression) {
-  this.name = name;
-  this.expression = expression;
-}
-ElementOn.prototype = new MarkupHook();
-ElementOn.prototype.type = 'ElementOn';
-ElementOn.prototype.serialize = function() {
-  return serializeObject.instance(this, this.name, this.expression);
-};
-ElementOn.prototype.emit = function(context, element) {
-  var expression = this.expression;
-  element.addEventListener(this.name, function elementOnListener(event) {
-    return expression.apply(context, null, {$event: event, $element: element});
-  }, false);
-};
-
-function ComponentOn(name, expression) {
-  this.name = name;
-  this.expression = expression;
-}
-ComponentOn.prototype = new MarkupHook();
-ComponentOn.prototype.type = 'ComponentOn';
-ComponentOn.prototype.serialize = function() {
-  return serializeObject.instance(this, this.name, this.expression);
-};
-ComponentOn.prototype.emit = function(context, component) {
-  var expression = this.expression;
-  component.on(this.name, function componentOnListener() {
-    var args = arguments.length && Array.prototype.slice.call(arguments);
-    return expression.apply(context, args);
-  });
-};
-
-function MarkupAs(segments) {
-  this.segments = segments;
-  this.lastSegment = segments.pop();
-}
-MarkupAs.prototype = new MarkupHook();
-MarkupAs.prototype.type = 'MarkupAs';
-MarkupAs.prototype.serialize = function() {
-  var segments = this.segments.concat(this.lastSegment);
-  return serializeObject.instance(this, segments);
-};
-MarkupAs.prototype.emit = function(context, target) {
-  var node = traverseAndCreate(context.controller, this.segments);
-  node[this.lastSegment] = target;
-};
-
-function traverseAndCreate(node, segments) {
-  var len = segments.length;
-  if (!len) return node;
-  for (var i = 0; i < len; i++) {
-    var segment = segments[i];
-    node = node[segment] || (node[segment] = {});
-  }
-  return node;
-}
-
-function hasKeys(value) {
-  if (!value) return false;
-  for (var key in value) {
-    return true;
-  }
-  return false;
-}
-
-},{"saddle":38,"serialize-object":39}],38:[function(require,module,exports){
-if (typeof require === 'function') {
-  var serializeObject = require('serialize-object');
-}
-
-// UPDATE_PROPERTIES map HTML attribute names to an Element DOM property that
-// should be used for setting on bindings updates instead of s'test'Attribute.
-//
-// https://github.com/jquery/jquery/blob/1.x-master/src/attributes/prop.js
-// https://github.com/jquery/jquery/blob/master/src/attributes/prop.js
-// http://webbugtrack.blogspot.com/2007/08/bug-242-setattribute-doesnt-always-work.html
-var UPDATE_PROPERTIES = {
-  checked: 'checked'
-, disabled: 'disabled'
-, selected: 'selected'
-, type: 'type'
-, value: 'value'
-, 'class': 'className'
-, 'for': 'htmlFor'
-, tabindex: 'tabIndex'
-, readonly: 'readOnly'
-, maxlength: 'maxLength'
-, cellspacing: 'cellSpacing'
-, cellpadding: 'cellPadding'
-, rowspan: 'rowSpan'
-, colspan: 'colSpan'
-, usemap: 'useMap'
-, frameborder: 'frameBorder'
-, contenteditable: 'contentEditable'
-, enctype: 'encoding'
-, id: 'id'
-, title: 'title'
-};
-// CREATE_PROPERTIES map HTML attribute names to an Element DOM property that
-// should be used for setting on Element rendering instead of setAttribute.
-// input.defaultChecked and input.defaultValue affect the attribute, so we want
-// to use these for initial dynamic rendering. For binding updates,
-// input.checked and input.value are modified.
-var CREATE_PROPERTIES = {};
-mergeInto(UPDATE_PROPERTIES, CREATE_PROPERTIES);
-CREATE_PROPERTIES.checked = 'defaultChecked';
-CREATE_PROPERTIES.value = 'defaultValue';
-
-// http://www.w3.org/html/wg/drafts/html/master/syntax.html#void-elements
-var VOID_ELEMENTS = {
-  area: true
-, base: true
-, br: true
-, col: true
-, embed: true
-, hr: true
-, img: true
-, input: true
-, keygen: true
-, link: true
-, menuitem: true
-, meta: true
-, param: true
-, source: true
-, track: true
-, wbr: true
-};
-
-var NAMESPACE_URIS = {
-  svg: 'http://www.w3.org/2000/svg'
-, xlink: 'http://www.w3.org/1999/xlink'
-, xmlns: 'http://www.w3.org/2000/xmlns/'
-};
-
-exports.CREATE_PROPERTIES = CREATE_PROPERTIES;
-exports.UPDATE_PROPERTIES = UPDATE_PROPERTIES;
-exports.VOID_ELEMENTS = VOID_ELEMENTS;
-exports.NAMESPACE_URIS = NAMESPACE_URIS;
-
-// Template Classes
-exports.Template = Template;
-exports.Doctype = Doctype;
-exports.Text = Text;
-exports.DynamicText = DynamicText;
-exports.Comment = Comment;
-exports.DynamicComment = DynamicComment;
-exports.Html = Html;
-exports.DynamicHtml = DynamicHtml;
-exports.Element = Element;
-exports.Block = Block;
-exports.ConditionalBlock = ConditionalBlock;
-exports.EachBlock = EachBlock;
-
-exports.Attribute = Attribute;
-exports.DynamicAttribute = DynamicAttribute;
-
-// Binding Classes
-exports.Binding = Binding;
-exports.NodeBinding = NodeBinding;
-exports.AttributeBinding = AttributeBinding;
-exports.RangeBinding = RangeBinding;
-
-function Template(content) {
-  this.content = content;
-}
-Template.prototype.get = function(context, unescaped) {
-  return contentHtml(this.content, context, unescaped);
-};
-Template.prototype.getFragment = function(context, binding) {
-  var fragment = document.createDocumentFragment();
-  this.appendTo(fragment, context, binding);
-  return fragment;
-};
-Template.prototype.appendTo = function(parent, context) {
-  appendContent(parent, this.content, context);
-};
-Template.prototype.attachTo = function(parent, node, context) {
-  return attachContent(parent, node, this.content, context);
-};
-Template.prototype.update = function() {};
-Template.prototype.stringify = function(value) {
-  return (value == null) ? '' : value + '';
-};
-Template.prototype.module = 'templates';
-Template.prototype.type = 'Template';
-Template.prototype.serialize = function() {
-  return serializeObject.instance(this, this.content);
-};
-
-
-function Doctype(name, publicId, systemId) {
-  this.name = name;
-  this.publicId = publicId;
-  this.systemId = systemId;
-}
-Doctype.prototype = new Template();
-Doctype.prototype.get = function() {
-  var publicText = (this.publicId) ?
-    ' PUBLIC "' + this.publicId  + '"' :
-    '';
-  var systemText = (this.systemId) ?
-    (this.publicId) ?
-      ' "' + this.systemId + '"' :
-      ' SYSTEM "' + this.systemId + '"' :
-    '';
-  return '<!DOCTYPE ' + this.name + publicText + systemText + '>';
-};
-Doctype.prototype.appendTo = function() {
-  // Doctype could be created via:
-  //   document.implementation.createDocumentType(this.name, this.publicId, this.systemId)
-  // However, it does not appear possible or useful to append it to the
-  // document fragment. Therefore, just don't render it in the browser
-};
-Doctype.prototype.attachTo = function(parent, node) {
-  if (!node || node.nodeType !== 10) {
-    throw attachError(parent, node);
-  }
-  return node.nextSibling;
-};
-Doctype.prototype.type = 'Doctype';
-Doctype.prototype.serialize = function() {
-  return serializeObject.instance(this, this.name, this.publicId, this.systemId);
-};
-
-function Text(data) {
-  this.data = data;
-  this.escaped = escapeHtml(data);
-}
-Text.prototype = new Template();
-Text.prototype.get = function(context, unescaped) {
-  return (unescaped) ? this.data : this.escaped;
-};
-Text.prototype.appendTo = function(parent) {
-  var node = document.createTextNode(this.data);
-  parent.appendChild(node);
-};
-Text.prototype.attachTo = function(parent, node) {
-  return attachText(parent, node, this.data, this);
-};
-Text.prototype.type = 'Text';
-Text.prototype.serialize = function() {
-  return serializeObject.instance(this, this.data);
-};
-
-function DynamicText(expression) {
-  this.expression = expression;
-}
-DynamicText.prototype = new Template();
-DynamicText.prototype.get = function(context, unescaped) {
-  var value = this.expression.get(context);
-  if (value instanceof Template) {
-    do {
-      value = value.get(context, unescaped);
-    } while (value instanceof Template);
-    return value;
-  }
-  var data = this.stringify(value);
-  return (unescaped) ? data : escapeHtml(data);
-};
-DynamicText.prototype.appendTo = function(parent, context) {
-  var value = this.expression.get(context);
-  if (value instanceof Template) {
-    value.appendTo(parent, context);
-    return;
-  }
-  var data = this.stringify(value);
-  var node = document.createTextNode(data);
-  parent.appendChild(node);
-  addNodeBinding(this, context, node);
-};
-DynamicText.prototype.attachTo = function(parent, node, context) {
-  var value = this.expression.get(context);
-  if (value instanceof Template) {
-    return value.attachTo(parent, node, context);
-  }
-  var data = this.stringify(value);
-  return attachText(parent, node, data, this, context);
-};
-DynamicText.prototype.update = function(context, binding) {
-  binding.node.data = this.stringify(this.expression.get(context));
-};
-DynamicText.prototype.type = 'DynamicText';
-DynamicText.prototype.serialize = function() {
-  return serializeObject.instance(this, this.expression);
-};
-
-function attachText(parent, node, data, template, context) {
-  if (!node) {
-    var newNode = document.createTextNode(data);
-    parent.appendChild(newNode);
-    addNodeBinding(template, context, newNode);
-    return;
-  }
-  if (node.nodeType === 3) {
-    // Proceed if nodes already match
-    if (node.data === data) {
-      addNodeBinding(template, context, node);
-      return node.nextSibling;
-    }
-    // Split adjacent text nodes that would have been merged together in HTML
-    var nextNode = splitData(node, data.length);
-    if (node.data !== data) {
-      throw attachError(parent, node);
-    }
-    addNodeBinding(template, context, node);
-    return nextNode;
-  }
-  // An empty text node might not be created at the end of some text
-  if (data === '') {
-    var newNode = document.createTextNode('');
-    parent.insertBefore(newNode, node || null);
-    addNodeBinding(template, context, newNode);
-    return node;
-  }
-  throw attachError(parent, node);
-}
-
-function Comment(data) {
-  this.data = data;
-}
-Comment.prototype = new Template();
-Comment.prototype.get = function() {
-  return '<!--' + this.data + '-->';
-};
-Comment.prototype.appendTo = function(parent) {
-  var node = document.createComment(this.data);
-  parent.appendChild(node);
-};
-Comment.prototype.attachTo = function(parent, node) {
-  return attachComment(parent, node, this.data);
-};
-Comment.prototype.type = 'Comment';
-Comment.prototype.serialize = function() {
-  return serializeObject.instance(this, this.data);
-}
-
-function DynamicComment(expression) {
-  this.expression = expression;
-}
-DynamicComment.prototype = new Template();
-DynamicComment.prototype.get = function(context) {
-  var value = getUnescapedValue(this.expression, context);
-  var data = this.stringify(value);
-  return '<!--' + data + '-->';
-};
-DynamicComment.prototype.appendTo = function(parent, context) {
-  var value = getUnescapedValue(this.expression, context);
-  var data = this.stringify(value);
-  var node = document.createComment(data);
-  parent.appendChild(node);
-  addNodeBinding(this, context, node);
-};
-DynamicComment.prototype.attachTo = function(parent, node, context) {
-  var value = getUnescapedValue(this.expression, context);
-  var data = this.stringify(value);
-  return attachComment(parent, node, data, this, context);
-};
-DynamicComment.prototype.update = function(context, binding) {
-  var value = getUnescapedValue(this.expression, context);
-  binding.node.data = this.stringify(value);
-};
-DynamicComment.prototype.type = 'DynamicComment';
-DynamicComment.prototype.serialize = function() {
-  return serializeObject.instance(this, this.expression);
-}
-
-function attachComment(parent, node, data, template, context) {
-  // Sometimes IE fails to create Comment nodes from HTML or innerHTML.
-  // This is an issue inside of <select> elements, for example.
-  if (!node || node.nodeType !== 8) {
-    var newNode = document.createComment(data);
-    parent.insertBefore(newNode, node || null);
-    addNodeBinding(template, context, newNode);
-    return node;
-  }
-  // Proceed if nodes already match
-  if (node.data === data) {
-    addNodeBinding(template, context, node);
-    return node.nextSibling;
-  }
-  throw attachError(parent, node);
-}
-
-function addNodeBinding(template, context, node) {
-  if (!context) return;
-  context.addBinding(new NodeBinding(template, context, node));
-}
-
-function Html(data) {
-  this.data = data;
-}
-Html.prototype = new Template();
-Html.prototype.get = function() {
-  return this.data;
-};
-Html.prototype.appendTo = function(parent) {
-  var fragment = createHtmlFragment(parent, this.data);
-  parent.appendChild(fragment);
-};
-Html.prototype.attachTo = function(parent, node) {
-  return attachHtml(parent, node, this.data);
-};
-Html.prototype.type = "Html";
-Html.prototype.serialize = function() {
-  return serializeObject.instance(this, this.data);
-};
-
-function DynamicHtml(expression) {
-  this.expression = expression;
-  this.ending = '/' + expression;
-}
-DynamicHtml.prototype = new Template();
-DynamicHtml.prototype.get = function(context) {
-  var value = getUnescapedValue(this.expression, context);
-  return this.stringify(value);
-};
-DynamicHtml.prototype.appendTo = function(parent, context, binding) {
-  var start = document.createComment(this.expression);
-  var end = document.createComment(this.ending);
-  var value = getUnescapedValue(this.expression, context);
-  var html = this.stringify(value);
-  var fragment = createHtmlFragment(parent, html);
-  parent.appendChild(start);
-  parent.appendChild(fragment);
-  parent.appendChild(end);
-  updateRange(context, binding, this, start, end);
-};
-DynamicHtml.prototype.attachTo = function(parent, node, context) {
-  var start = document.createComment(this.expression);
-  var end = document.createComment(this.ending);
-  var value = getUnescapedValue(this.expression, context);
-  var html = this.stringify(value);
-  parent.insertBefore(start, node || null);
-  node = attachHtml(parent, node, html);
-  parent.insertBefore(end, node || null);
-  updateRange(context, null, this, start, end);
-  return node;
-};
-DynamicHtml.prototype.update = function(context, binding) {
-  // Get start and end in advance, since binding is mutated in getFragment
-  var start = binding.start;
-  var end = binding.end;
-  var value = getUnescapedValue(this.expression, context);
-  var html = this.stringify(value);
-  var fragment = createHtmlFragment(binding.start.parentNode, html);
-  replaceRange(context, start, end, fragment, binding);
-};
-DynamicHtml.prototype.type = 'DynamicHtml';
-DynamicHtml.prototype.serialize = function() {
-  return serializeObject.instance(this, this.expression);
-};
-
-function createHtmlFragment(parent, html) {
-  if (parent.nodeType === 1) {
-    var range = document.createRange();
-    range.selectNodeContents(parent);
-    return range.createContextualFragment(html);
-  }
-  var div = document.createElement('div');
-  var range = document.createRange();
-  div.innerHTML = html;
-  range.selectNodeContents(div);
-  return range.extractContents();
-}
-function attachHtml(parent, node, html) {
-  var fragment = createHtmlFragment(parent, html);
-  for (var i = 0, len = fragment.childNodes.length; i < len; i++) {
-    if (!node) throw attachError(parent, node);
-    node = node.nextSibling;
-  }
-  return node;
-}
-
-function Attribute(data, ns) {
-  this.data = data;
-  this.ns = ns;
-}
-Attribute.prototype.get = Attribute.prototype.getBound = function(context) {
-  return this.data;
-};
-Attribute.prototype.module = Template.prototype.module;
-Attribute.prototype.type = 'Attribute';
-Attribute.prototype.serialize = function() {
-  return serializeObject.instance(this, this.data, this.ns);
-};
-
-function DynamicAttribute(expression, ns) {
-  // In attributes, expression may be an instance of Template or Expression
-  this.expression = expression;
-  this.ns = ns;
-}
-DynamicAttribute.prototype = new Attribute();
-DynamicAttribute.prototype.get = function(context) {
-  return getUnescapedValue(this.expression, context);
-};
-DynamicAttribute.prototype.getBound = function(context, element, name) {
-  context.addBinding(new AttributeBinding(this, context, element, name));
-  return getUnescapedValue(this.expression, context);
-};
-DynamicAttribute.prototype.update = function(context, binding) {
-  var value = getUnescapedValue(this.expression, context);
-  var element = binding.element;
-  var propertyName = !element.ns && UPDATE_PROPERTIES[binding.name];
-  if (propertyName) {
-    if (value === void 0) value = null;
-    element[propertyName] = value;
-    return;
-  }
-  if (value === false || value == null) {
-    if (this.ns) {
-      element.removeAttributeNS(this.ns, binding.name);
-    } else {
-      element.removeAttribute(binding.name);
-    }
-    return;
-  }
-  if (value === true) value = binding.name;
-  if (this.ns) {
-    element.setAttributeNS(this.ns, binding.name, value);
-  } else {
-    element.setAttribute(binding.name, value);
-  }
-};
-DynamicAttribute.prototype.type = 'DynamicAttribute';
-DynamicAttribute.prototype.serialize = function() {
-  return serializeObject.instance(this, this.expression, this.ns);
-};
-
-function getUnescapedValue(expression, context) {
-  var unescaped = true;
-  var value = expression.get(context, unescaped);
-  while (value instanceof Template) {
-    value = value.get(context, unescaped);
-  }
-  return value;
-}
-
-function Element(tagName, attributes, content, hooks, selfClosing, notClosed, ns) {
-  this.tagName = tagName;
-  this.attributes = attributes;
-  this.content = content;
-  this.hooks = hooks;
-  this.selfClosing = selfClosing;
-  this.notClosed = notClosed;
-  this.ns = ns;
-
-  var lowerTagName = tagName.toLowerCase();
-  var isVoid = VOID_ELEMENTS[lowerTagName];
-  this.startClose = (selfClosing) ? ' />' : '>';
-  this.endTag = (isVoid || selfClosing || notClosed) ? '' : '</' + tagName + '>';
-  this.unescapedContent = (lowerTagName === 'script' || lowerTagName === 'style');
-}
-Element.prototype = new Template();
-Element.prototype.get = function(context) {
-  var tagItems = [this.tagName];
-  for (var key in this.attributes) {
-    var value = this.attributes[key].get(context);
-    if (value === true) {
-      tagItems.push(key);
-    } else if (value !== false && value != null) {
-      tagItems.push(key + '="' + escapeAttribute(value) + '"');
-    }
-  }
-  var startTag = '<' + tagItems.join(' ') + this.startClose;
-  if (this.content) {
-    var inner = contentHtml(this.content, context, this.unescapedContent);
-    return startTag + inner + this.endTag;
-  }
-  return startTag + this.endTag;
-};
-Element.prototype.appendTo = function(parent, context) {
-  var element = (this.ns) ?
-    document.createElementNS(this.ns, this.tagName) :
-    document.createElement(this.tagName);
-  emitHooks(this.hooks, context, element);
-  for (var key in this.attributes) {
-    var attribute = this.attributes[key];
-    var value = attribute.getBound(context, element, key);
-    if (value === false || value == null) continue;
-    var propertyName = !this.ns && CREATE_PROPERTIES[key];
-    if (propertyName) {
-      element[propertyName] = value;
-      continue;
-    }
-    if (value === true) value = key;
-    if (attribute.ns) {
-      element.setAttributeNS(attribute.ns, key, value);
-    } else {
-      element.setAttribute(key, value);
-    }
-  }
-  if (this.content) appendContent(element, this.content, context);
-  parent.appendChild(element);
-};
-Element.prototype.attachTo = function(parent, node, context) {
-  if (
-    !node ||
-    node.nodeType !== 1 ||
-    (node.tagName).toLowerCase() !== (this.tagName).toLowerCase()
-  ) {
-    throw attachError(parent, node);
-  }
-  emitHooks(this.hooks, context, node);
-  for (var key in this.attributes) {
-    // Get each attribute to create bindings
-    this.attributes[key].getBound(context, node, key);
-    // TODO: Ideally, this would also check that the node's current attributes
-    // are equivalent, but there are some tricky edge cases
-  }
-  if (this.content) attachContent(node, node.firstChild, this.content, context);
-  return node.nextSibling;
-};
-Element.prototype.type = 'Element';
-Element.prototype.serialize = function() {
-  return serializeObject.instance(
-    this
-  , this.tagName
-  , this.attributes
-  , this.content
-  , this.hooks
-  , this.selfClosing
-  , this.notClosed
-  , this.ns
-  );
-};
-
-function getAttributeValue(element, name) {
-  var propertyName = UPDATE_PROPERTIES[name];
-  return (propertyName) ? element[propertyName] : element.getAttribute(name);
-}
-
-function emitHooks(hooks, context, value) {
-  if (!hooks) return;
-  for (var i = 0, len = hooks.length; i < len; i++) {
-    hooks[i].emit(context, value);
-  }
-}
-
-function Block(expression, content) {
-  this.expression = expression;
-  this.ending = '/' + expression;
-  this.content = content;
-}
-Block.prototype = new Template();
-Block.prototype.get = function(context, unescaped) {
-  var blockContext = context.child(this.expression);
-  return contentHtml(this.content, blockContext, unescaped);
-};
-Block.prototype.appendTo = function(parent, context, binding) {
-  var blockContext = context.child(this.expression);
-  var start = document.createComment(this.expression);
-  var end = document.createComment(this.ending);
-  parent.appendChild(start);
-  appendContent(parent, this.content, blockContext);
-  parent.appendChild(end);
-  updateRange(context, binding, this, start, end);
-};
-Block.prototype.attachTo = function(parent, node, context) {
-  var blockContext = context.child(this.expression);
-  var start = document.createComment(this.expression);
-  var end = document.createComment(this.ending);
-  parent.insertBefore(start, node || null);
-  node = attachContent(parent, node, this.content, blockContext);
-  parent.insertBefore(end, node || null);
-  updateRange(context, null, this, start, end);
-  return node;
-};
-Block.prototype.type = 'Block';
-Block.prototype.serialize = function() {
-  return serializeObject.instance(this, this.expression, this.content);
-};
-
-function ConditionalBlock(expressions, contents) {
-  this.expressions = expressions;
-  this.beginning = expressions.join('; ');
-  this.ending = '/' + this.beginning;
-  this.contents = contents;
-  this.last = null;
-}
-ConditionalBlock.prototype = new Block();
-ConditionalBlock.prototype.get = function(context, unescaped) {
-  var html = '';
-  for (var i = 0, len = this.expressions.length; i < len; i++) {
-    var expression = this.expressions[i];
-    if (expression.truthy(context)) {
-      var blockContext = context.child(expression);
-      html += contentHtml(this.contents[i], blockContext, unescaped);
-      break;
-    }
-  }
-  return html;
-};
-ConditionalBlock.prototype.appendTo = function(parent, context, binding) {
-  var start = document.createComment(this.beginning);
-  var end = document.createComment(this.ending);
-  parent.appendChild(start);
-  this.last = null;
-  for (var i = 0, len = this.expressions.length; i < len; i++) {
-    var expression = this.expressions[i];
-    if (expression.truthy(context)) {
-      this.last = i;
-      var blockContext = context.child(expression);
-      appendContent(parent, this.contents[i], blockContext);
-      break;
-    }
-  }
-  parent.appendChild(end);
-  updateRange(context, binding, this, start, end);
-};
-ConditionalBlock.prototype.attachTo = function(parent, node, context) {
-  var start = document.createComment(this.beginning);
-  var end = document.createComment(this.ending);
-  parent.insertBefore(start, node || null);
-  this.last = null;
-  for (var i = 0, len = this.expressions.length; i < len; i++) {
-    var expression = this.expressions[i];
-    if (expression.truthy(context)) {
-      this.last = i;
-      var blockContext = context.child(expression);
-      node = attachContent(parent, node, this.contents[i], blockContext);
-      break;
-    }
-  }
-  parent.insertBefore(end, node || null);
-  updateRange(context, null, this, start, end);
-  return node;
-};
-ConditionalBlock.prototype.type = 'ConditionalBlock';
-ConditionalBlock.prototype.serialize = function() {
-  return serializeObject.instance(this, this.expressions, this.contents);
-};
-ConditionalBlock.prototype.update = function(context, binding) {
-  var value = null;
-  for (var i = 0, len = this.expressions.length; i < len; i++) {
-    if (this.expressions[i].truthy(context)) {
-      value = i;
-      break;
-    }
-  }
-  if (value === this.last) return;
-  // Get start and end in advance, since binding is mutated in getFragment
-  var start = binding.start;
-  var end = binding.end;
-  var fragment = this.getFragment(context, binding);
-  replaceRange(context, start, end, fragment, binding);
-};
-
-function EachBlock(expression, content, elseContent) {
-  this.expression = expression;
-  this.ending = '/' + expression;
-  this.content = content;
-  this.elseContent = elseContent;
-}
-EachBlock.prototype = new Block();
-EachBlock.prototype.get = function(context, unescaped) {
-  var items = this.expression.get(context);
-  var listContext = context.child(this.expression);
-  if (items && items.length) {
-    var html = '';
-    for (var i = 0, len = items.length; i < len; i++) {
-      var itemContext = listContext.eachChild(i);
-      html += contentHtml(this.content, itemContext, unescaped);
-    }
-    return html;
-  } else if (this.elseContent) {
-    return contentHtml(this.elseContent, listContext, unescaped);
-  }
-  return '';
-};
-EachBlock.prototype.appendTo = function(parent, context, binding) {
-  var items = this.expression.get(context);
-  var listContext = context.child(this.expression);
-  var start = document.createComment(this.expression);
-  var end = document.createComment(this.ending);
-  parent.appendChild(start);
-  if (items && items.length) {
-    for (var i = 0, len = items.length; i < len; i++) {
-      var itemContext = listContext.eachChild(i);
-      this.appendItemTo(parent, itemContext, start);
-    }
-  } else if (this.elseContent) {
-    appendContent(parent, this.elseContent, listContext);
-  }
-  parent.appendChild(end);
-  updateRange(context, binding, this, start, end);
-};
-EachBlock.prototype.appendItemTo = function(parent, context, itemFor, binding) {
-  var before = parent.lastChild;
-  var start, end;
-  appendContent(parent, this.content, context);
-  if (before === parent.lastChild) {
-    start = end = document.createComment('empty');
-    parent.appendChild(start);
-  } else {
-    start = (before && before.nextSibling) || parent.firstChild;
-    end = parent.lastChild;
-  }
-  updateRange(context, binding, this, start, end, itemFor);
-};
-EachBlock.prototype.attachTo = function(parent, node, context) {
-  var items = this.expression.get(context);
-  var listContext = context.child(this.expression);
-  var start = document.createComment(this.expression);
-  var end = document.createComment(this.ending);
-  parent.insertBefore(start, node || null);
-  if (items && items.length) {
-    for (var i = 0, len = items.length; i < len; i++) {
-      var itemContext = listContext.eachChild(i);
-      node = this.attachItemTo(parent, node, itemContext, start);
-    }
-  } else if (this.elseContent) {
-    node = attachContent(parent, node, this.elseContent, listContext);
-  }
-  parent.insertBefore(end, node || null);
-  updateRange(context, null, this, start, end);
-  return node;
-};
-EachBlock.prototype.attachItemTo = function(parent, node, context, itemFor) {
-  var start, end;
-  var nextNode = attachContent(parent, node, this.content, context);
-  if (nextNode === node) {
-    start = end = document.createComment('empty');
-    parent.insertBefore(start, node || null);
-  } else {
-    start = node;
-    end = (nextNode && nextNode.previousSibling) || parent.lastChild;
-  }
-  updateRange(context, null, this, start, end, itemFor);
-  return nextNode;
-};
-EachBlock.prototype.update = function(context, binding) {
-  var start = binding.start;
-  var end = binding.end;
-  if (binding.itemFor) {
-    var fragment = document.createDocumentFragment();
-    this.appendItemTo(fragment, context, binding.itemFor, binding);
-  } else {
-    var fragment = this.getFragment(context, binding);
-  }
-  replaceRange(context, start, end, fragment, binding);
-};
-EachBlock.prototype.insert = function(context, binding, index, howMany) {
-  var items = this.expression.get(context);
-  var listContext = context.child(this.expression);
-  var node = indexStartNode(binding, index);
-  var fragment = document.createDocumentFragment();
-  for (var i = index, len = index + howMany; i < len; i++) {
-    var itemContext = listContext.eachChild(i);
-    this.appendItemTo(fragment, itemContext, binding.start);
-  }
-  binding.start.parentNode.insertBefore(fragment, node || null);
-};
-EachBlock.prototype.remove = function(context, binding, index, howMany) {
-  var node = indexStartNode(binding, index);
-  var i = 0;
-  var parent = binding.start.parentNode;
-  while (node) {
-    var nextNode = node.nextSibling;
-    parent.removeChild(node);
-    emitRemoved(context, node, binding);
-    if (node.$bindEnd && node.$bindEnd.itemFor === binding.start) {
-      if (howMany === ++i) return;
-    }
-    node = nextNode;
-  }
-};
-EachBlock.prototype.move = function(context, binding, from, to, howMany) {
-  var node = indexStartNode(binding, from);
-  var fragment = document.createDocumentFragment();
-  var i = 0;
-  while (node) {
-    var nextNode = node.nextSibling;
-    fragment.appendChild(node);
-    if (node.$bindEnd && node.$bindEnd.itemFor === binding.start) {
-      if (howMany === ++i) break;
-    }
-    node = nextNode;
-  }
-  node = indexStartNode(binding, to);
-  binding.start.parentNode.insertBefore(fragment, node || null);
-};
-EachBlock.prototype.type = 'EachBlock';
-EachBlock.prototype.serialize = function() {
-  return serializeObject.instance(this, this.expression, this.content, this.elseContent);
-};
-
-function indexStartNode(binding, index) {
-  var node = binding.start;
-  var i = 0;
-  while (node = node.nextSibling) {
-    if (node === binding.end) return node;
-    if (node.$bindStart && node.$bindStart.itemFor === binding.start) {
-      if (index === i) return node;
-      i++;
-    }
-  }
-}
-
-function updateRange(context, binding, template, start, end, itemFor) {
-  if (binding) {
-    binding.start = start;
-    binding.end = end;
-    setNodeProperty(start, '$bindStart', binding);
-    setNodeProperty(end, '$bindEnd', binding);
-  } else {
-    context.addBinding(new RangeBinding(template, context, start, end, itemFor));
-  }
-}
-
-function appendContent(parent, content, context) {
-  for (var i = 0, len = content.length; i < len; i++) {
-    content[i].appendTo(parent, context);
-  }
-}
-function attachContent(parent, node, content, context) {
-  for (var i = 0, len = content.length; i < len; i++) {
-    node = content[i].attachTo(parent, node, context);
-  }
-  return node;
-}
-function contentHtml(content, context, unescaped) {
-  var html = '';
-  for (var i = 0, len = content.length; i < len; i++) {
-    html += content[i].get(context, unescaped);
-  }
-  return html;
-}
-function replaceRange(context, start, end, fragment, binding) {
-  var parent = start.parentNode;
-  // This shouldn't happen if bindings are cleaned up properly, but check
-  // in case they aren't
-  if (!parent) return;
-  if (start === end) {
-    parent.replaceChild(fragment, start);
-    emitRemoved(context, start, binding);
-    return;
-  }
-  // Remove all nodes from start to end, inclusive
-  var node = start;
-  var nextNode;
-  while (node) {
-    nextNode = node.nextSibling;
-    emitRemoved(context, node, binding);
-    parent.removeChild(node);
-    if (node === end) break;
-    node = nextNode;
-  }
-  // This also works if nextNode is null, by doing an append
-  parent.insertBefore(fragment, nextNode || null);
-}
-function emitRemoved(context, node, ignore) {
-  var binding = node.$bindNode;
-  if (binding && binding !== ignore) context.removeBinding(binding);
-  binding = node.$bindStart;
-  if (binding && binding !== ignore) context.removeBinding(binding);
-  var attributes = node.$bindAttributes;
-  if (attributes) {
-    for (var key in attributes) {
-      context.removeBinding(attributes[key]);
-    }
-  }
-  for (node = node.firstChild; node; node = node.nextSibling) {
-    emitRemoved(context, node, ignore);
-  }
-}
-
-function attachError(parent, node) {
-  if (typeof console !== 'undefined') {
-    console.error('Attach failed for', node, 'within', parent);
-  }
-  return new Error('Attaching bindings failed, because HTML structure ' +
-    'does not match client rendering.'
-  );
-}
-
-function Binding() {
-  this.meta = null;
-}
-Binding.prototype.type = 'Binding';
-Binding.prototype.update = function() {
-  this.template.update(this.context, this);
-};
-Binding.prototype.insert = function() {
-  this.update();
-};
-Binding.prototype.remove = function() {
-  this.update();
-};
-Binding.prototype.move = function() {
-  this.update();
-};
-
-function NodeBinding(template, context, node) {
-  this.template = template;
-  this.context = context;
-  this.node = node;
-  this.meta = null;
-  setNodeProperty(node, '$bindNode', this);
-}
-NodeBinding.prototype = new Binding();
-NodeBinding.prototype.type = 'NodeBinding';
-
-function AttributeBindingsMap() {}
-function AttributeBinding(template, context, element, name) {
-  this.template = template;
-  this.context = context;
-  this.element = element;
-  this.name = name;
-  this.meta = null;
-  var map = element.$bindAttributes ||
-    (element.$bindAttributes = new AttributeBindingsMap());
-  map[name] = this;
-}
-AttributeBinding.prototype = new Binding();
-AttributeBinding.prototype.type = 'AttributeBinding';
-
-function RangeBinding(template, context, start, end, itemFor) {
-  this.template = template;
-  this.context = context;
-  this.start = start;
-  this.end = end;
-  this.itemFor = itemFor;
-  this.meta = null;
-  setNodeProperty(start, '$bindStart', this);
-  setNodeProperty(end, '$bindEnd', this);
-}
-RangeBinding.prototype = new Binding();
-RangeBinding.prototype.type = 'RangeBinding';
-RangeBinding.prototype.insert = function(index, howMany) {
-  if (this.template.insert) {
-    this.template.insert(this.context, this, index, howMany);
-  } else {
-    this.template.update(this.context, this);
-  }
-};
-RangeBinding.prototype.remove = function(index, howMany) {
-  if (this.template.remove) {
-    this.template.remove(this.context, this, index, howMany);
-  } else {
-    this.template.update(this.context, this);
-  }
-};
-RangeBinding.prototype.move = function(from, to, howMany) {
-  if (this.template.move) {
-    this.template.move(this.context, this, from, to, howMany);
-  } else {
-    this.template.update(this.context, this);
-  }
-};
-
-
-//// Utility functions ////
-
-function noop() {}
-
-function mergeInto(from, to) {
-  for (var key in from) {
-    to[key] = from[key];
-  }
-}
-
-function escapeHtml(string) {
-  string = string + '';
-  return string.replace(/[&<]/g, function(match) {
-    return (match === '&') ? '&amp;' : '&lt;';
-  });
-}
-
-function escapeAttribute(string) {
-  string = string + '';
-  return string.replace(/[&"]/g, function(match) {
-    return (match === '&') ? '&amp;' : '&quot;';
-  });
-}
-
-
-//// IE shims & workarounds ////
-
-// General notes:
-// 
-// In all cases, Node.insertBefore should have `|| null` after its second
-// argument. IE works correctly when the argument is ommitted or equal
-// to null, but it throws and error if it is equal to undefined.
-
-if (!Array.isArray) {
-  Array.isArray = function(value) {
-    return Object.prototype.toString.call(value) === '[object Array]';
-  };
-}
-
-// Equivalent to textNode.splitText, which is buggy in IE <=9
-function splitData(node, index) {
-  var newNode = node.cloneNode(false);
-  newNode.deleteData(0, index);
-  node.deleteData(index, node.length - index);
-  node.parentNode.insertBefore(newNode, node.nextSibling || null);
-  return newNode;
-}
-
-// Defined so that it can be overriden in IE <=8
-function setNodeProperty(node, key, value) {
-  return node[key] = value;
-}
-
-(function() {
-  // Don't try to shim in Node.js environment
-  if (typeof document === 'undefined') return;
-
-  // TODO: Shim createHtmlFragment for old IE
-
-  // TODO: Shim setAttribute('style'), which doesn't work in IE <=7
-  // http://webbugtrack.blogspot.com/2007/10/bug-245-setattribute-style-does-not.html
-
-  // TODO: Investigate whether input name attribute works in IE <=7. We could
-  // override Element::appendTo to use IE's alternative createElement syntax:
-  // document.createElement('<input name="xxx">')
-  // http://webbugtrack.blogspot.com/2007/10/bug-235-createelement-is-broken-in-ie.html
-
-  // In IE, input.defaultValue doesn't work correctly, so use input.value,
-  // which mistakenly but conveniently sets both the value property and attribute.
-  // 
-  // Surprisingly, in IE <=7, input.defaultChecked must be used instead of
-  // input.checked before the input is in the document.
-  // http://webbugtrack.blogspot.com/2007/11/bug-299-setattribute-checked-does-not.html
-  var input = document.createElement('input');
-  input.defaultValue = 'x';
-  if (input.value !== 'x') {
-    CREATE_PROPERTIES.value = 'value';
-  }
-
-  try {
-    // TextNodes are not expando in IE <=8
-    document.createTextNode('').$try = 0;
-  } catch (err) {
-    setNodeProperty = function(node, key, value) {
-      // If trying to set a property on a TextNode, create a proxy CommentNode
-      // and set the property on that node instead. Put the proxy after the
-      // TextNode if marking the end of a range, and before otherwise.
-      if (node.nodeType === 3) {
-        var proxyNode;
-        if (key === '$bindEnd') {
-          proxyNode = node.nextSibling;
-          if (!proxyNode || proxyNode.$bindProxy !== node) {
-            proxyNode = document.createComment('proxy');
-            proxyNode.$bindProxy = node;
-            node.parentNode.insertBefore(proxyNode, node.nextSibling || null);
-          }
-        } else {
-          proxyNode = node.previousSibling;
-          if (!proxyNode || proxyNode.$bindProxy !== node) {
-            proxyNode = document.createComment('proxy');
-            proxyNode.$bindProxy = node;
-            node.parentNode.insertBefore(proxyNode, node || null);
-          }
-        }
-        return proxyNode[key] = value;
-      }
-      // Set the property directly on other node types
-      return node[key] = value;
-    };
-  }
-})();
-
-},{"serialize-object":39}],39:[function(require,module,exports){
-exports.instance = serializeInstance;
-exports.args = serializeArgs;
-exports.value = serializeValue;
-
-function serializeInstance(instance) {
-  var args = Array.prototype.slice.call(arguments, 1);
-  return 'new ' + instance.module + '.' + instance.type +
-    '(' + serializeArgs(args) + ')';
-}
-
-function serializeArgs(args) {
-  // Map each argument into its string representation
-  var items = [];
-  for (var i = args.length; i--;) {
-    var item = serializeValue(args[i]);
-    items.unshift(item);
-  }
-  // Remove trailing null values, assuming they are optional
-  for (var i = items.length; i--;) {
-    var item = items[i];
-    if (item !== 'void 0' && item !== 'null') break;
-    items.pop();
-  }
-  return items.join(', ');
-}
-
-function serializeValue(input) {
-  if (input && input.serialize) {
-    return input.serialize();
-
-  } else if (typeof input === 'undefined') {
-    return 'void 0';
-
-  } else if (input === null) {
-    return 'null';
-
-  } else if (typeof input === 'string') {
-    return formatString(input);
-
-  } else if (typeof input === 'number' || typeof input === 'boolean') {
-    return input + '';
-
-  } else if (Array.isArray(input)) {
-    var items = [];
-    for (var i = 0; i < input.length; i++) {
-      var value = serializeValue(input[i]);
-      items.push(value);
-    }
-    return '[' + items.join(', ') + ']';
-
-  } else if (typeof input === 'object') {
-    var items = [];
-    for (var key in input) {
-      var value = serializeValue(input[key]);
-      items.push(formatString(key) + ': ' + value);
-    }
-    return '{' + items.join(', ') + '}';
-  }
-}
-function formatString(value) {
-  var escaped = value.replace(/['\r\n\\]/g, function(match) {
-    return (match === '\'') ? '\\\'' :
-      (match === '\r') ? '\\r' :
-      (match === '\n') ? '\\n' :
-      (match === '\\') ? '\\\\' :
-      '';
-  });
-  return '\'' + escaped + '\'';
-}
-
 },{}],40:[function(require,module,exports){
 var parse = require('./parse');
 
@@ -11500,6 +11940,22 @@ module.exports = function(html, options) {
 }
 
 },{}],42:[function(require,module,exports){
+module.exports=require(32)
+},{"./lib/contexts":43,"./lib/expressions":44,"./lib/operatorFns":45,"./lib/templates":46}],43:[function(require,module,exports){
+module.exports=require(33)
+},{}],44:[function(require,module,exports){
+module.exports=require(34)
+},{"./operatorFns":45,"./templates":46,"serialize-object":49}],45:[function(require,module,exports){
+module.exports=require(35)
+},{}],46:[function(require,module,exports){
+module.exports=require(36)
+},{"saddle":47,"serialize-object":49}],47:[function(require,module,exports){
+module.exports=require(37)
+},{"serialize-object":48}],48:[function(require,module,exports){
+module.exports=require(38)
+},{}],49:[function(require,module,exports){
+module.exports=require(38)
+},{}],50:[function(require,module,exports){
 module.exports = Doc;
 
 function Doc(model, collectionName, id) {
@@ -11517,7 +11973,7 @@ Doc.prototype._errorMessage = function(description, segments, value) {
     JSON.stringify(value, null, 2);
 };
 
-},{}],43:[function(require,module,exports){
+},{}],51:[function(require,module,exports){
 var Doc = require('./Doc');
 var util = require('../util');
 
@@ -11729,7 +12185,7 @@ function nodeCreateArray(node, key) {
   return node[key] || (node[key] = []);
 }
 
-},{"../util":56,"./Doc":42}],44:[function(require,module,exports){
+},{"../util":64,"./Doc":50}],52:[function(require,module,exports){
 var uuid = require('node-uuid');
 
 Model.INITS = [];
@@ -11769,10 +12225,11 @@ function ChildModel(model) {
   this._at = model._at;
   this._pass = model._pass;
   this._silent = model._silent;
+  this._eventContext = model._eventContext;
 }
 ChildModel.prototype = new Model();
 
-},{"node-uuid":59}],45:[function(require,module,exports){
+},{"node-uuid":67}],53:[function(require,module,exports){
 module.exports = require('./Model');
 
 require('./events');
@@ -11786,7 +12243,7 @@ require('./filter');
 require('./refList');
 require('./ref');
 
-},{"./Model":44,"./collections":46,"./events":48,"./filter":49,"./fn":50,"./mutators":51,"./paths":52,"./ref":53,"./refList":54,"./setDiff":55}],46:[function(require,module,exports){
+},{"./Model":52,"./collections":54,"./events":56,"./filter":57,"./fn":58,"./mutators":59,"./paths":60,"./ref":61,"./refList":62,"./setDiff":63}],54:[function(require,module,exports){
 var Model = require('./Model');
 var LocalDoc = require('./LocalDoc');
 var util = require('../util');
@@ -11863,24 +12320,27 @@ Model.prototype.getOrCreateDoc = function(collectionName, id, data) {
  */
 Model.prototype.destroy = function(subpath) {
   var segments = this._splitPath(subpath);
-  var collections = this.root.collections;
+  // Silently remove all types of listeners within subpath
+  var silentModel = this.silent();
+  silentModel.removeAllListeners(null, subpath);
+  silentModel._removeAllRefs(segments);
+  silentModel._stopAll(segments);
+  silentModel._removeAllFilters(segments);
   // Silently remove all model data within subpath
   if (segments.length === 0) {
-    for (var collectionName in collections) {
-      var collection = collections[collectionName];
-      collection && collection.destroy();
+    this.root.collections = new CollectionMap();
+    // Delete each property of data instead of creating a new object so that
+    // it is possible to continue using a reference to the original data object
+    var data = this.root.data;
+    for (var key in data) {
+      delete data[key];
     }
   } else if (segments.length === 1) {
-    var collection = collections[segments[0]];
+    var collection = this.getCollection(segments[0]);
     collection && collection.destroy();
   } else {
-    this.silent()._del(segments);
+    silentModel._del(segments);
   }
-  // Remove all types of listeners within subpath
-  this.removeAllRefs(subpath);
-  this.stopAll(subpath);
-  this.removeAllFilters(subpath);
-  this.removeAllListeners(null, subpath);
 };
 
 function Collection(model, name, Doc) {
@@ -11934,7 +12394,7 @@ function noKeys(object) {
   return true;
 }
 
-},{"../util":56,"./LocalDoc":43,"./Model":44}],47:[function(require,module,exports){
+},{"../util":64,"./LocalDoc":51,"./Model":52}],55:[function(require,module,exports){
 var defaultFns = module.exports = new DefaultFns();
 
 defaultFns.reverse = new FnPair(getReverse, setReverse);
@@ -11965,7 +12425,7 @@ function desc(a, b) {
   return 0;
 }
 
-},{}],48:[function(require,module,exports){
+},{}],56:[function(require,module,exports){
 var EventEmitter = require('events').EventEmitter;
 var util = require('../util');
 var Model = require('./Model');
@@ -11997,7 +12457,9 @@ Model.INITS.push(function(model) {
   }
 
   model.root._mutatorEventQueue = null;
-  model._pass = new Passed({}, {});
+  model.root._pass = new Passed({}, {});
+  model.root._silent = null;
+  model.root._eventContext = null;
 });
 
 util.mergeInto(Model.prototype, EventEmitter.prototype);
@@ -12024,33 +12486,29 @@ Model.prototype.emit = function(type) {
   if (type === 'error') {
     return this._emit.apply(this, arguments);
   }
-  try {
-    if (Model.MUTATOR_EVENTS[type]) {
-      if (this._silent) return this;
-      var segments = arguments[1];
-      var eventArgs = arguments[2];
-      if (this.root._mutatorEventQueue) {
-        this.root._mutatorEventQueue.push([type, segments, eventArgs]);
-        return this;
-      }
-      this.root._mutatorEventQueue = [];
-      this._emit(type, segments, eventArgs);
-      this._emit('all', segments, [type].concat(eventArgs));
-      while (this.root._mutatorEventQueue.length) {
-        var queued = this.root._mutatorEventQueue.shift();
-        type = queued[0];
-        segments = queued[1];
-        eventArgs = queued[2];
-        this._emit(type, segments, eventArgs);
-        this._emit('all', segments, [type].concat(eventArgs));
-      }
-      this.root._mutatorEventQueue = null;
+  if (Model.MUTATOR_EVENTS[type]) {
+    if (this._silent) return this;
+    var segments = arguments[1];
+    var eventArgs = arguments[2];
+    if (this.root._mutatorEventQueue) {
+      this.root._mutatorEventQueue.push([type, segments, eventArgs]);
       return this;
     }
-    return this._emit.apply(this, arguments);
-  } catch (err) {
-    this.emit('error', err);
+    this.root._mutatorEventQueue = [];
+    this._emit(type, segments, eventArgs);
+    this._emit('all', segments, [type].concat(eventArgs));
+    while (this.root._mutatorEventQueue.length) {
+      var queued = this.root._mutatorEventQueue.shift();
+      type = queued[0];
+      segments = queued[1];
+      eventArgs = queued[2];
+      this._emit(type, segments, eventArgs);
+      this._emit('all', segments, [type].concat(eventArgs));
+    }
+    this.root._mutatorEventQueue = null;
+    return this;
   }
+  return this._emit.apply(this, arguments);
 };
 
 Model.prototype._on = EventEmitter.prototype.on;
@@ -12073,8 +12531,6 @@ Model.prototype.once = function(type, pattern, cb) {
 
 Model.prototype._removeAllListeners = EventEmitter.prototype.removeAllListeners;
 Model.prototype.removeAllListeners = function(type, subpattern) {
-  if (!this._events) return this;
-
   // If a pattern is specified without an event type, remove all model event
   // listeners under that pattern for all events
   if (!type) {
@@ -12105,6 +12561,7 @@ Model.prototype.removeAllListeners = function(type, subpattern) {
       this.removeListener(type, listener);
     }
   }
+  return this;
 };
 
 function patternContained(pattern, segments, listener) {
@@ -12148,25 +12605,50 @@ Model.prototype.silent = function(value) {
   return model;
 };
 
+Model.prototype.eventContext = function(value) {
+  var model = this._child();
+  model._eventContext = value;
+  return model;
+};
+
+Model.prototype.removeContextListeners = function(value) {
+  if (arguments.length === 0) {
+    value = this._eventContext;
+  }
+  // Remove all events created within a given context
+  for (var type in this._events) {
+    var listeners = this.listeners(type);
+    // Make sure to iterate in reverse, since the array might be
+    // mutated as listeners are removed
+    for (var i = listeners.length; i--;) {
+      var listener = listeners[i];
+      if (listener.eventContext === value) {
+        this.removeListener(type, listener);
+      }
+    }
+  }
+  return this;
+};
+
 function eventListener(model, subpattern, cb) {
   if (cb) {
     // For signatures:
     // model.on('change', 'example.subpath', callback)
     // model.at('example').on('change', 'subpath', callback)
     var pattern = model.path(subpattern);
-    return modelEventListener(pattern, cb);
+    return modelEventListener(pattern, cb, model._eventContext);
   }
   var path = model.path();
   cb = arguments[1];
   // For signature:
   // model.at('example').on('change', callback)
-  if (path) return modelEventListener(path, cb);
+  if (path) return modelEventListener(path, cb, model._eventContext);
   // For signature:
   // model.on('normalEvent', callback)
   return cb;
 }
 
-function modelEventListener(pattern, cb) {
+function modelEventListener(pattern, cb, eventContext) {
   var patternSegments = util.castSegments(pattern.split('.'));
   var testFn = testPatternFn(pattern, patternSegments);
 
@@ -12182,6 +12664,7 @@ function modelEventListener(pattern, cb) {
   // Used in Model#removeAllListeners
   modelListener.pattern = pattern;
   modelListener.patternSegments = patternSegments;
+  modelListener.eventContext = eventContext;
 
   return modelListener;
 }
@@ -12238,7 +12721,7 @@ function stripRestWildcard(segments) {
   return true;
 }
 
-},{"../util":56,"./Model":44,"events":11}],49:[function(require,module,exports){
+},{"../util":64,"./Model":52,"events":11}],57:[function(require,module,exports){
 var util = require('../util');
 var Model = require('./Model');
 var defaultFns = require('./defaultFns');
@@ -12302,6 +12785,9 @@ Model.prototype.sort = function() {
 
 Model.prototype.removeAllFilters = function(subpath) {
   var segments = this._splitPath(subpath);
+  this._removeAllFilters(segments);
+};
+Model.prototype._removeAllFilters = function(segments) {
   var filters = this.root._filters.fromMap;
   for (var from in filters) {
     if (util.contains(segments, filters[from].fromSegments)) {
@@ -12394,81 +12880,73 @@ Filter.prototype._slice = function(results) {
 };
 
 Filter.prototype.ids = function() {
-  try {
-    var items = this.model._get(this.inputSegments);
-    var ids = [];
-    if (!items) return ids;
-    if (Array.isArray(items)) {
-      if (this.filterFn) {
-        for (var i = 0; i < items.length; i++) {
-          if (this.filterFn.call(this.model, items[i], i, items)) {
-            ids.push(i);
-          }
+  var items = this.model._get(this.inputSegments);
+  var ids = [];
+  if (!items) return ids;
+  if (Array.isArray(items)) {
+    if (this.filterFn) {
+      for (var i = 0; i < items.length; i++) {
+        if (this.filterFn.call(this.model, items[i], i, items)) {
+          ids.push(i);
         }
-      } else {
-        for (var i = 0; i < items.length; i++) ids.push(i);
       }
     } else {
-      if (this.filterFn) {
-        for (var key in items) {
-          if (items.hasOwnProperty(key) &&
-            this.filterFn.call(this.model, items[key], key, items)
-          ) {
-            ids.push(key);
-          }
+      for (var i = 0; i < items.length; i++) ids.push(i);
+    }
+  } else {
+    if (this.filterFn) {
+      for (var key in items) {
+        if (items.hasOwnProperty(key) &&
+          this.filterFn.call(this.model, items[key], key, items)
+        ) {
+          ids.push(key);
         }
-      } else {
-        ids = Object.keys(items);
       }
+    } else {
+      ids = Object.keys(items);
     }
-    var sortFn = this.sortFn;
-    if (sortFn) {
-      ids.sort(function(a, b) {
-        return sortFn(items[a], items[b]);
-      });
-    }
-    return this._slice(ids);
-  } catch (err) {
-    this.model.emit('error', err);
   }
+  var sortFn = this.sortFn;
+  if (sortFn) {
+    ids.sort(function(a, b) {
+      return sortFn(items[a], items[b]);
+    });
+  }
+  return this._slice(ids);
 };
 
 Filter.prototype.get = function() {
-  try {
-    var items = this.model._get(this.inputSegments);
-    var results = [];
-    if (Array.isArray(items)) {
-      if (this.filterFn) {
-        for (var i = 0; i < items.length; i++) {
-          if (this.filterFn.call(this.model, items[i], i, items)) {
-            results.push(items[i]);
-          }
+  var items = this.model._get(this.inputSegments);
+  var results = [];
+  if (Array.isArray(items)) {
+    if (this.filterFn) {
+      for (var i = 0; i < items.length; i++) {
+        if (this.filterFn.call(this.model, items[i], i, items)) {
+          results.push(items[i]);
         }
-      } else {
-        results = items.slice();
       }
     } else {
-      if (this.filterFn) {
-        for (var key in items) {
-          if (items.hasOwnProperty(key) &&
-            this.filterFn.call(this.model, items[key], key, items)
-          ) {
-            results.push(items[key]);
-          }
+      results = items.slice();
+    }
+  } else {
+    if (this.filterFn) {
+      for (var key in items) {
+        if (items.hasOwnProperty(key) &&
+          this.filterFn.call(this.model, items[key], key, items)
+        ) {
+          results.push(items[key]);
         }
-      } else {
-        for (var key in items) {
-          if (items.hasOwnProperty(key)) {
-            results.push(items[key]);
-          }
+      }
+    } else {
+      for (var key in items) {
+        if (items.hasOwnProperty(key)) {
+          results.push(items[key]);
         }
       }
     }
-    if (this.sortFn) results.sort(this.sortFn);
-    return this._slice(results);
-  } catch (err) {
-    this.model.emit('error', err);
   }
+  if (this.sortFn) results.sort(this.sortFn);
+  return this._slice(results);
 };
 
 Filter.prototype.update = function(pass) {
@@ -12488,11 +12966,11 @@ Filter.prototype.ref = function(from) {
 
 Filter.prototype.destroy = function() {
   delete this.filters.fromMap[this.from];
-  this.model.removeRefList(this.from);
+  this.model._removeRef(this.idsSegments);
   this.model._del(this.idsSegments);
 };
 
-},{"../util":56,"./Model":44,"./defaultFns":47}],50:[function(require,module,exports){
+},{"../util":64,"./Model":52,"./defaultFns":55}],58:[function(require,module,exports){
 var util = require('../util');
 var Model = require('./Model');
 var defaultFns = require('./defaultFns');
@@ -12569,15 +13047,22 @@ Model.prototype.start = function() {
 
 Model.prototype.stop = function(subpath) {
   var path = this.path(subpath);
-  this.root._fns.stop(path);
+  this._stop(path);
+};
+Model.prototype._stop = function(fromPath) {
+  this.root._fns.stop(fromPath);
 };
 
 Model.prototype.stopAll = function(subpath) {
   var segments = this._splitPath(subpath);
+  this._stopAll(segments);
+};
+Model.prototype._stopAll = function(segments) {
   var fns = this.root._fns.fromMap;
   for (var from in fns) {
-    if (util.contains(segments, fns[from].fromSegments)) {
-      this.stop(from);
+    var fromSegments = fns[from].fromSegments;
+    if (util.contains(segments, fromSegments)) {
+      this._stop(from);
     }
   }
 };
@@ -12629,8 +13114,7 @@ function Fn(model, name, from, inputPaths, fns, options) {
   this.inputPaths = inputPaths;
   this.options = options;
   if (!fns) {
-    var err = new TypeError('Model function not found: ' + name);
-    model.emit('error', err);
+    throw new TypeError('Model function not found: ' + name);
   }
   this.getFn = fns.get || fns;
   this.setFn = fns.set;
@@ -12640,15 +13124,14 @@ function Fn(model, name, from, inputPaths, fns, options) {
     var segments = this.inputPaths[i].split('.');
     this.inputsSegments.push(segments);
   }
+
+  // Copy can be 'output', 'input', 'both', or 'none'
   var copy = (options && options.copy) || 'output';
   this.copyInput = (copy === 'input' || copy === 'both');
   this.copyOutput = (copy === 'output' || copy === 'both');
 
-  var equal = (options && options.equal === 'strict') ? util.equal : util.deepEqual;
-  this.diffOptions = {equal: equal};
-
-  // Mode can be 'array', 'diff', or 'set'
-  this.mode = (options && options.mode) || 'diff';
+  // Mode can be 'diffDeep', 'diff', 'arrayDeep', 'array', or 'set'
+  this.mode = (options && options.mode) || 'diffDeep';
 }
 
 Fn.prototype.apply = function(fn, inputs) {
@@ -12656,11 +13139,7 @@ Fn.prototype.apply = function(fn, inputs) {
     var input = this.model._get(this.inputsSegments[i]);
     inputs.push(this.copyInput ? util.deepCopy(input) : input);
   }
-  try {
-    return fn.apply(this.model, inputs);
-  } catch (err) {
-    this.model.emit('error', err);
-  }
+  return fn.apply(this.model, inputs);
 };
 
 Fn.prototype.get = function() {
@@ -12691,16 +13170,20 @@ Fn.prototype.onOutput = function(pass) {
 };
 
 Fn.prototype._setValue = function(model, segments, value) {
-  if (this.mode === 'set') {
-    model._set(segments, value);
+  if (this.mode === 'diffDeep') {
+    model._setDiffDeep(segments, value);
+  } else if (this.mode === 'diff') {
+    model._setDiff(segments, value);
+  } else if (this.mode === 'arrayDeep') {
+    model._setArrayDiffDeep(segments, value);
   } else if (this.mode === 'array') {
     model._setArrayDiff(segments, value);
   } else {
-    model._setDiff(segments, value, this.diffOptions);
+    model._set(segments, value);
   }
 };
 
-},{"../util":56,"./Model":44,"./defaultFns":47}],51:[function(require,module,exports){
+},{"../util":64,"./Model":52,"./defaultFns":55}],59:[function(require,module,exports){
 var util = require('../util');
 var Model = require('./Model');
 
@@ -12738,6 +13221,9 @@ Model.prototype._set = function(segments, value, cb) {
   var model = this;
   function set(doc, docSegments, fnCb) {
     var previous = doc.set(docSegments, value, fnCb);
+    // On setting the entire doc, remote docs sometimes do a copy to add the
+    // id without it being stored in the database by ShareJS
+    if (docSegments.length === 0) value = doc.get(docSegments);
     model.emit('change', segments, [value, previous, model._pass]);
     return previous;
   }
@@ -12964,7 +13450,7 @@ Model.prototype._unshift = function(segments, value, cb) {
 Model.prototype.insert = function() {
   var subpath, index, values, cb;
   if (arguments.length === 1) {
-    this.emit('error', new Error('Not enough arguments for insert'));
+    throw new Error('Not enough arguments for insert');
   } else if (arguments.length === 2) {
     index = arguments[0];
     values = arguments[1];
@@ -13122,7 +13608,7 @@ Model.prototype._remove = function(segments, index, howMany, cb) {
 Model.prototype.move = function() {
   var subpath, from, to, howMany, cb;
   if (arguments.length === 1) {
-    this.emit('error', new Error('Not enough arguments for move'));
+    throw new Error('Not enough arguments for move');
   } else if (arguments.length === 2) {
     from = arguments[0];
     to = arguments[1];
@@ -13193,7 +13679,7 @@ Model.prototype._move = function(segments, from, to, howMany, cb) {
 Model.prototype.stringInsert = function() {
   var subpath, index, text, cb;
   if (arguments.length === 1) {
-    this.emit('error', new Error('Not enough arguments for stringInsert'));
+    throw new Error('Not enough arguments for stringInsert');
   } else if (arguments.length === 2) {
     index = arguments[0];
     text = arguments[1];
@@ -13232,7 +13718,7 @@ Model.prototype._stringInsert = function(segments, index, text, cb) {
 Model.prototype.stringRemove = function() {
   var subpath, index, howMany, cb;
   if (arguments.length === 1) {
-    this.emit('error', new Error('Not enough arguments for stringRemove'));
+    throw new Error('Not enough arguments for stringRemove');
   } else if (arguments.length === 2) {
     index = arguments[0];
     howMany = arguments[1];
@@ -13268,7 +13754,7 @@ Model.prototype._stringRemove = function(segments, index, howMany, cb) {
   return this._mutate(segments, stringRemove, cb);
 };
 
-},{"../util":56,"./Model":44}],52:[function(require,module,exports){
+},{"../util":64,"./Model":52}],60:[function(require,module,exports){
 var Model = require('./Model');
 
 exports.mixin = {};
@@ -13350,7 +13836,7 @@ Model.prototype.leaf = function(path) {
   return path.slice(i + 1);
 };
 
-},{"./Model":44}],53:[function(require,module,exports){
+},{"./Model":52}],61:[function(require,module,exports){
 var util = require('../util');
 var Model = require('./Model');
 
@@ -13420,8 +13906,18 @@ function addIndexListeners(model) {
   }
 }
 
-function refChange(model, dereferenced, eventArgs) {
+function refChange(model, dereferenced, eventArgs, segments) {
   var value = eventArgs[0];
+  // Detect if we are deleting vs. setting to undefined
+  if (value === void 0) {
+    var parentSegments = segments.slice();
+    var last = parentSegments.pop();
+    var parent = model._get(parentSegments);
+    if (!parent || !(last in parent)) {
+      model._del(dereferenced);
+      return;
+    }
+  }
   model._set(dereferenced, value);
 }
 function refLoad(model, dereferenced, eventArgs) {
@@ -13486,7 +13982,7 @@ function addListener(model, type, fn) {
         } else {
           var setterModel = ref.model.pass(pass, true);
           setterModel._dereference = noopDereference;
-          fn(setterModel, dereferenced, eventArgs);
+          fn(setterModel, dereferenced, eventArgs, segments);
         }
       }
     }
@@ -13535,9 +14031,8 @@ Model.prototype.ref = function() {
   if (!toPath) return to.ref(fromPath);
   var fromSegments = fromPath.split('.');
   if (fromSegments.length < 2) {
-    var message = 'ref must be performed under a collection ' +
-      'and document id. Invalid path: ' + fromPath;
-    this.emit('error', new Error(message));
+    throw new Error('ref must be performed under a collection ' +
+      'and document id. Invalid path: ' + fromPath);
   }
   this.root._refs.remove(fromPath);
   var value = this.get(to);
@@ -13546,24 +14041,30 @@ Model.prototype.ref = function() {
   return this.scope(fromPath);
 };
 
-Model.prototype.removeRef = function(from) {
-  var fromPath = this.path(from);
+Model.prototype.removeRef = function(subpath) {
+  var segments = this._splitPath(subpath);
+  var fromPath = segments.join('.');
+  this._removeRef(segments, fromPath);
+};
+Model.prototype._removeRef = function(segments, fromPath) {
   this.root._refs.remove(fromPath);
-  this.del(from);
+  this.root._refLists.remove(fromPath);
+  this._del(segments);
 };
 
 Model.prototype.removeAllRefs = function(subpath) {
   var segments = this._splitPath(subpath);
-  var refs = this.root._refs.fromMap;
-  var refLists = this.root._refLists.fromMap;
-  for (var from in refs) {
-    if (util.contains(segments, refs[from].fromSegments)) {
-      this.removeRef(from);
-    }
-  }
-  for (var from in refLists) {
-    if (util.contains(segments, refLists[from].fromSegments)) {
-      this.removeRefList(from);
+  this._removeAllRefs(segments);
+};
+Model.prototype._removeAllRefs = function(segments) {
+  this._removeMapRefs(segments, this.root._refs.fromMap);
+  this._removeMapRefs(segments, this.root._refLists.fromMap);
+};
+Model.prototype._removeMapRefs = function(segments, map) {
+  for (var from in map) {
+    var fromSegments = map[from].fromSegments;
+    if (util.contains(segments, fromSegments)) {
+      this._removeRef(fromSegments, from);
     }
   }
 };
@@ -13684,7 +14185,7 @@ function listMapRemove(map, name, item) {
   if (!items.length) delete map[name];
 }
 
-},{"../util":56,"./Model":44}],54:[function(require,module,exports){
+},{"../util":64,"./Model":52}],62:[function(require,module,exports){
 var util = require('../util');
 var Model = require('./Model');
 
@@ -13783,9 +14284,8 @@ function patchFromEvent(type, segments, eventArgs, refList) {
 
   // Mutation underneath a child of the `from` object.
   if (segmentsLength > fromLength + 1) {
-    var message = 'Mutation on descendant of refList `from` should have been dereferenced: ' + segments.join('.');
-    model.emit('error', new Error(message));
-    return;
+    throw new Error('Mutation on descendant of refList `from`' +
+      ' should have been dereferenced: ' + segments.join('.'));
   }
 
   // Otherwise, mutation of a child of the `from` object
@@ -13813,9 +14313,8 @@ function patchFromEvent(type, segments, eventArgs, refList) {
     return;
   }
   if (type === 'insert' || type === 'remove' || type === 'move') {
-    var message = 'Array mutation on child of refList `from` should have been dereferenced: ' + segments.join('.');
-    model.emit('error', new Error(message));
-    return;
+    throw new Error('Array mutation on child of refList `from`' +
+      'should have been dereferenced: ' + segments.join('.'));
   }
 }
 
@@ -13835,8 +14334,7 @@ function setNewToValues(model, refList, values, fn) {
     }
     var toSegments = refList.toSegmentsByItem(value);
     if (id === void 0 || toSegments === void 0) {
-      var message = 'Unable to add item to refList: ' + value;
-      return model.emit('error', new Error(message));
+      throw new Error('Unable to add item to refList: ' + value);
     }
     if (model._get(toSegments) !== value) {
       model._set(toSegments, value);
@@ -14094,12 +14592,6 @@ Model.prototype.refList = function() {
   return this.scope(fromPath);
 };
 
-Model.prototype.removeRefList = function(from) {
-  var fromPath = this.path(from);
-  var refList = this.root._refLists.remove(fromPath);
-  if (refList) this._del(refList.fromSegments);
-};
-
 function RefList(model, from, to, ids, options) {
   this.model = model && model.pass({$refList: this});
   this.from = from;
@@ -14215,7 +14707,7 @@ RefLists.prototype.toJSON = function() {
   return out;
 };
 
-},{"../util":56,"./Model":44}],55:[function(require,module,exports){
+},{"../util":64,"./Model":52}],63:[function(require,module,exports){
 var util = require('../util');
 var Model = require('./Model');
 var arrayDiff = require('arraydiff');
@@ -14424,15 +14916,12 @@ Model.prototype._applyArrayDiff = function(segments, diff, cb) {
   return this._mutate(segments, applyArrayDiff, cb);
 };
 
-},{"../util":56,"./Model":44,"arraydiff":57}],56:[function(require,module,exports){
+},{"../util":64,"./Model":52,"arraydiff":65}],64:[function(require,module,exports){
 (function (process){
 var deepIs = require('deep-is');
 
 var isServer = process.title !== 'browser';
-var isProduction = process.env.NODE_ENV === 'production';
-
 exports.isServer = isServer;
-exports.isProduction = isProduction;
 
 exports.asyncGroup = asyncGroup;
 exports.castSegments = castSegments;
@@ -14449,6 +14938,7 @@ exports.mergeInto = mergeInto;
 exports.mayImpact = mayImpact;
 exports.mayImpactAny = mayImpactAny;
 exports.serverRequire = serverRequire;
+exports.serverUse = serverUse;
 exports.use = use;
 
 function asyncGroup(cb) {
@@ -14588,20 +15078,18 @@ function mergeInto(to, from) {
   return to;
 }
 
-function serverRequire(name) {
+function serverRequire(module, id) {
   if (!isServer) return;
-  // Tricks Browserify into not logging a warning
-  var _require = require;
-  return _require(name);
+  return module.require(id);
+}
+
+function serverUse(module, id, options) {
+  if (!isServer) return this;
+  var plugin = module.require(id);
+  return this.use(plugin, options);
 }
 
 function use(plugin, options) {
-  // Server-side plugins may be included via filename
-  if (typeof plugin === 'string') {
-    if (!isServer) return this;
-    plugin = serverRequire(plugin);
-  }
-
   // Don't include a plugin more than once
   var plugins = this._plugins || (this._plugins = []);
   if (plugins.indexOf(plugin) === -1) {
@@ -14611,8 +15099,8 @@ function use(plugin, options) {
   return this;
 }
 
-}).call(this,require("/Users/enjamini/code/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js"))
-},{"/Users/enjamini/code/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js":12,"deep-is":58}],57:[function(require,module,exports){
+}).call(this,require("/Users/enjalot/lever/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js"))
+},{"/Users/enjalot/lever/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js":12,"deep-is":66}],65:[function(require,module,exports){
 module.exports = arrayDiff;
 
 // Based on some rough benchmarking, this algorithm is about O(2n) worst case,
@@ -14795,7 +15283,7 @@ function arrayDiff(before, after, equalFn) {
   return removes.concat(outputMoves, inserts);
 }
 
-},{}],58:[function(require,module,exports){
+},{}],66:[function(require,module,exports){
 var pSlice = Array.prototype.slice;
 var Object_keys = typeof Object.keys === 'function'
     ? Object.keys
@@ -14899,7 +15387,7 @@ function objEquiv(a, b) {
   return true;
 }
 
-},{}],59:[function(require,module,exports){
+},{}],67:[function(require,module,exports){
 (function (Buffer){
 //     uuid.js
 //
@@ -15148,7 +15636,7 @@ function objEquiv(a, b) {
 }).call(this);
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":2,"crypto":6}],60:[function(require,module,exports){
+},{"buffer":2,"crypto":6}],68:[function(require,module,exports){
 var qs = require('qs')
 var parseUrl = require('url').parse
 var resolveUrl = require('url').resolve
@@ -15180,9 +15668,6 @@ function History(app, routes) {
   this.replace = function(url) {
     window.location.replace(url)
   }
-  this.refresh = function() {
-    window.location.reload()
-  }
 }
 
 History.prototype.push = function(url, render, state, e) {
@@ -15196,7 +15681,8 @@ History.prototype.replace = function(url, render, state, e) {
 // Rerender the current url locally
 History.prototype.refresh = function() {
   var path = routePath(window.location.href)
-  router.render(this, {url: path, previous: path, method: 'get'})
+  // Note that we don't pass previous to avoid triggering transitions
+  router.render(this, {url: path, method: 'get'})
 }
 
 History.prototype.back = function() {
@@ -15349,6 +15835,9 @@ function addListeners(history) {
   }
 
   function onPopState(e) {
+    // HACK: Chrome sometimes does a pop state before the app is set up properly
+    if (!history.app.page) return
+
     var previous = currentPath
     var state = e.state
     currentPath = window.location.pathname + window.location.search
@@ -15382,16 +15871,15 @@ function addListeners(history) {
     }
   }
 
-  document.addEventListener('click', onClick, false)
+  document.addEventListener('click', onClick, true)
   document.addEventListener('submit', onSubmit, false)
-  window.addEventListener('popstate', onPopState, false)
+  window.addEventListener('popstate', onPopState, true)
 }
 
-},{"./router":63,"qs":64,"url":18}],61:[function(require,module,exports){
+},{"./router":70,"qs":71,"url":18}],69:[function(require,module,exports){
 var Route = require('../vendor/express/router/route')
 var History = require('./History')
 var router = module.exports = require('./router')
-var compose = require('./compose')
 
 router.setup = setup
 
@@ -15399,16 +15887,13 @@ function setup(app) {
   var routes = {
     queue: {}
   , transitional: {}
-  , onRoute: function(callback, page, params, next, isTransitional, done) {
-      return app.onRoute(callback, page, params, next, isTransitional, done)
-    }
+  , app: app
   }
   app.history = new History(app, routes)
 
   ;['get', 'post', 'put', 'del', 'enter', 'exit'].forEach(function(method) {
     var queue = routes.queue[method] = []
     var transitional = routes.transitional[method] = []
-    var transitionalCalls = []
 
     app[method] = function(pattern, callback) {
       if (Array.isArray(pattern)) {
@@ -15423,12 +15908,6 @@ function setup(app) {
         var to = pattern.to
         var forward = pattern.forward || (callback && callback.forward) || callback
         var back = pattern.back || (callback && callback.back)
-        transitionalCalls.push({
-          from: from
-        , to: to
-        , forward: forward
-        , back: back
-        })
 
         var fromRoute = new Route(method, from, back)
         var toRoute = new Route(method, to, forward)
@@ -15443,7 +15922,6 @@ function setup(app) {
         , to: fromRoute
         })
 
-        compose.transition(app[method], transitionalCalls, from, to, forward, back)
         return app
       }
 
@@ -15453,104 +15931,7 @@ function setup(app) {
   })
 }
 
-},{"../vendor/express/router/route":65,"./History":60,"./compose":62,"./router":63}],62:[function(require,module,exports){
-var router = module.exports = require('./router')
-
-module.exports = {
-  transition: transition
-}
-
-/**
- * @param {Function} add (e.g., app.get, app.post, etc.)
- * @param {Array} transitionCalls is an array of objects that look 
- *   like {from, to, forward, back}
- * @param {String} from
- * @param {String} to
- * @param {Function} forward
- * @param {Function} back
- */
-function transition(add, calls, from, to, forward, back) {
-  if (from === to) return
-  for (var i = 0, len = calls.length; i < len; i++) {
-    var call = calls[i]
-    if (call.from === to) {
-      if (hasTransition(calls, from, call.to)) continue
-      var composedForward = composeCallbacks(forward, call.forward, to)
-      if (back && call.back) {
-        var composedBack = composeCallbacks(call.back, back, to)
-      }
-      add({
-        from: from
-      , to: call.to
-      , forward: composedForward
-      , back: composedBack
-      })
-    } else if (call.to === from) {
-      if (hasTransition(calls, call.from, to)) continue
-      var composedForward = composeCallbacks(call.forward, forward, from)
-      if (back && call.back) {
-        var composedBack = composeCallbacks(back, call.back, from)
-      }
-      add({
-        from: call.from
-      , to: to
-      , forward: composedForward
-      , back: composedBack
-      })
-    }
-  }
-}
-
-function hasTransition(calls, from, to) {
-  for (var i = calls.length; i--;) {
-    var call = calls[i];
-    if (call.from === from && call.to === to) return true
-  }
-  return false
-}
-
-// TODO: Async support
-function composeCallbacks(first, second, intermediatePath) {
-  function composed(self, model, params, next, done) {
-    var intermediateUrl = router.mapRoute(intermediatePath, params)
-    var url = params.url
-    var skipped = false
-    function wrapNext(err) {
-      skipped = true
-      next(err)
-    }
-    params.url = intermediateUrl
-    if (first.length === 4) {
-      first.call(self, model, params, wrapNext, doneFirst)
-    } else {
-      first.call(self, model, params, wrapNext)
-      doneFirst()
-    }
-    function doneFirst() {
-      if (skipped) return
-      params.previous = intermediateUrl
-      params.url = url
-      if (second.length === 4) {
-        second.call(self, model, params, next, done)
-      } else {
-        second.call(self, model, params, next)
-        done && done()
-      }
-    }
-  }
-  // These need to be defined individually, since their
-  // argument length will be checked
-  function asyncComposedCallback(model, params, next, done) {
-    composed(this, model, params, next, done);
-  }
-  function composedCallback(model, params, next) {
-    composed(this, model, params, next);
-  }
-  return (first.length === 4 || second.length === 4) ?
-    asyncComposedCallback : composedCallback;
-}
-
-},{"./router":63}],63:[function(require,module,exports){
+},{"../vendor/express/router/route":72,"./History":68,"./router":70}],70:[function(require,module,exports){
 var qs = require('qs')
 var nodeUrl = require('url');
 
@@ -15584,10 +15965,8 @@ function render(history, options, e) {
   req.routeTransitional(0, function() {
     req.page = history.page()
     req.routeQueue(0, function() {
-      req.routeAndTransition(0, function() {
-        // Cancel rendering by this app if no routes match
-        req.cancel()
-      })
+      // Cancel rendering by this app if no routes match
+      req.cancel()
     })
   })
 }
@@ -15601,11 +15980,10 @@ function RenderReq(page, routes, options, e) {
   this.query = queryString ? qs.parse(queryString) : {}
   this.method = options.method
   this.body = options.body || {}
-  this.previous = options.previous
-  this.previousPath = options.previous && options.previous.replace(/\?.*/, '')
+  this.setPrevious(options.previous)
   this.transitional = routes.transitional[this.method]
   this.queue = routes.queue[this.method]
-  this.onRoute = routes.onRoute
+  this.app = routes.app
 }
 
 RenderReq.prototype.cancel = function() {
@@ -15617,9 +15995,6 @@ RenderReq.prototype.cancel = function() {
   if (options.form) {
     options.form.setAttribute('data-router-ignore', '')
     options.form.submit()
-  } else if (options.link) {
-    options.link.setAttribute('data-router-ignore', '')
-    options.link.click()
   } else {
     window.location.assign(options.url)
   }
@@ -15627,7 +16002,11 @@ RenderReq.prototype.cancel = function() {
 
 RenderReq.prototype.setUrl = function(url) {
   this.url = url
-  this.path = this.url.replace(/\?.*/, '')
+  this.path = url.replace(/\?.*/, '')
+}
+RenderReq.prototype.setPrevious = function(previous) {
+  this.previous = previous
+  this.previousPath = previous && previous.replace(/\?.*/, '')
 }
 
 RenderReq.prototype.routeTransitional = function(i, next) {
@@ -15636,8 +16015,7 @@ RenderReq.prototype.routeTransitional = function(i, next) {
   while (item = this.transitional[i++]) {
     if (!item.to.match(this.path) || !item.from.match(this.previousPath)) continue
     var req = this
-    var otherParams = this.routeParams(item.from)
-    var params = this.routeParams(item.to, otherParams)
+    var params = this.routeParams(item.to)
     // Even though we don't need to do anything after a done, pass a
     // no op function, so that routes can expect it to be defined
     function done() {}
@@ -15666,66 +16044,25 @@ RenderReq.prototype.routeQueue = function(i, next) {
   next()
 }
 
-RenderReq.prototype.routeAndTransition = function(i, next) {
-  i || (i = 0)
-  var render = this.page.render
-  var item
-  while (item = this.transitional[i++]) {
-    if (!item.to.match(this.path)) continue
-    var url = this.url
-    var params = this.routeParams(item.to)
-    this.setUrl(mapRoute(item.from.path, params))
-    var req = this
-    var skipped = false
-    function continueNext() {
-      skipped = true
-      req.setUrl(url)
-      req.page.render = render
-      req.routeAndTransition(i, next)
-    }
-    this.page.render = function() {
-      var renderArguments = arguments
-      function done() {
-        if (skipped) return
-        req.page.render = render
-        render.apply(req.page, renderArguments)
-      }
-      req.setUrl(url)
-      var isAsync = req.onMatch(item.to, params, continueNext, done)
-      if (isAsync) return
-      done()
-    }
-    this.routeQueue(0, continueNext)
-    return
-  }
-  next()
-}
-
 RenderReq.prototype.onMatch = function(route, params, next, done) {
+  if (!this.page) return next()
   // Stop the default browser action, such as clicking a link or submitting a form
   if (this.e) {
     this.e.preventDefault()
     this.e = null
   }
   this.page.params = params
-  return this.onRoute(
-    route.callbacks
-  , this.page
-  , this.page.params
-  , next
-  , route.isTransitional
-  , done
-  )
+  if (route.isTransitional) {
+    this.app.onRoute(route.callbacks, this.page, next, done)
+  } else {
+    this.app.onRoute(route.callbacks, this.page, next)
+  }
 }
 
-RenderReq.prototype.routeParams = function(route, otherParams) {
+RenderReq.prototype.routeParams = function(route) {
   var routeParams = route.params
   var params = routeParams.slice()
-  if (otherParams) {
-    for (var key in otherParams) {
-      params[key] = otherParams[key]
-    }
-  }
+
   for (var key in routeParams) {
     params[key] = routeParams[key]
   }
@@ -15737,7 +16074,7 @@ RenderReq.prototype.routeParams = function(route, otherParams) {
   return params
 }
 
-},{"qs":64,"url":18}],64:[function(require,module,exports){
+},{"qs":71,"url":18}],71:[function(require,module,exports){
 /**
  * Object#toString() ref for stringify().
  */
@@ -16105,7 +16442,7 @@ function decode(str) {
   }
 }
 
-},{}],65:[function(require,module,exports){
+},{}],72:[function(require,module,exports){
 
 /**
  * Module dependencies.
@@ -16179,7 +16516,7 @@ Route.prototype.match = function(path){
   return true;
 };
 
-},{"../utils":66}],66:[function(require,module,exports){
+},{"../utils":73}],73:[function(require,module,exports){
 
 /**
  * Module dependencies.
