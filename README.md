@@ -8,7 +8,7 @@ Client-side only version of Derby
 
 ## Hosted
 ```
-<script src="http://codeparty.github.io/derby-standalone/dist/0.6.0-alpha25/derby-standalone.min.js"></script>
+<script src="http://derbyjs.github.io/derby-standalone/dist/0.6.0-alpha25/derby-standalone.min.js"></script>
 ```
 
 ## Bower
