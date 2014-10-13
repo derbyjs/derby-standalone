@@ -6,12 +6,12 @@ all: Makefile build
 
 #TODO make this named by the version
 browserify:
-	rm dist/derby-standalone.js
-	$(BROWSERIFY) index.js -o dist/derby-standalone.js
+	rm -f dist/derby-standalone.v0.js
+	$(BROWSERIFY) index.js -o dist/derby-standalone.v0.js
 
 uglify:
-	rm dist/derby-standalone.min.js
-	$(JS_UGLIFIER) dist/derby-standalone.js -o dist/derby-standalone.min.js
+	rm -f dist/derby-standalone.v0.min.js
+	$(JS_UGLIFIER) dist/derby-standalone.v0.js -o dist/derby-standalone.v0.min.js
 
 build: browserify uglify
 
