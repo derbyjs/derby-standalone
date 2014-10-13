@@ -10,7 +10,6 @@
     padding: 10px;
     border: 0 solid black;
     border-width: 0 0 1px;
-    cursor: default;
   }
   .tabs > li.active {
     border-width: 1px 1px 0;
@@ -50,7 +49,12 @@
 <script src="/derby-standalone.js"></script>
 <script>
 var app = derby.createApp();
-app.registerViews();
+
+var templates = document.querySelectorAll('script[type="text/template"]');
+for (var i = 0; i < templates.length; i++) {
+  var template = templates[i];
+  app.views.register(template.id, template.innerHTML, template.dataset);
+}
 
 app.component('tabs', Tabs);
 function Tabs() {}
