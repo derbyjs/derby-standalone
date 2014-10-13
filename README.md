@@ -20,8 +20,8 @@ bower install derby-standalone
 # Examples
 
 [Data Visualization](http://enjalot.github.io/pinyin/)  
-[In CodePen](http://codepen.io/enjalot/pen/JpxGn)  
-[Hosted example](http://derbyjs.github.io/derby-standalone/example/)  
+A Simple Tabs [example](http://derbyjs.github.io/derby-standalone/example/) also available [on CodePen](http://codepen.io/enjalot/pen/JpxGn).  
+You can easily use derby-standalone [inside your own projects](http://bl.ocks.org/enjalot/630d636f1ae0db4e517c).
 
 
 # Building
