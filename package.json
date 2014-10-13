@@ -15,13 +15,17 @@
   "bugs": {
     "url": "https://github.com/codeparty/derby-standalone/issues"
   },
+  "scripts": {
+    "build": "node build.js"
+  },
   "dependencies": {
-    "derby": "~0.6"
+    "derby": "~0.6",
+    "mkdirp": "^0.5.0"
   },
   "devDependencies": {
-    "express": "^3.5.1",
-    "browserify": "^3.38.1",
-    "minifyify": "^2.3.0",
-    "uglify-js": "~2.4.13"
+    "browserify": "^6.0.2",
+    "minifyify": "^4.4.0",
+    "exorcist": "^0.1.6",
+    "express": "^4.9.5"
   }
 }

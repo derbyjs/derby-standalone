@@ -1,9 +1,6 @@
 var DerbyStandalone = require('derby/lib/DerbyStandalone');
 global.derby = module.exports = new DerbyStandalone();
 
-// Include template and expression parsing
-require('derby/node_modules/derby-parsing');
-
 module.exports.App.prototype.registerViews = function(selector) {
   selector || (selector = 'script[type="text/template"]');
   var templates = document.querySelectorAll(selector);
@@ -12,3 +9,6 @@ module.exports.App.prototype.registerViews = function(selector) {
     this.views.register(template.id, template.innerHTML, template.dataset);
   }
 };
+
+// Include template and expression parsing
+require('derby/node_modules/derby-parsing');
