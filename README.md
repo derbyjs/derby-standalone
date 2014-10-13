@@ -1,7 +1,7 @@
 derby-standalone
 ================
 
-Client-side only version of Derby. Create and use components, and data-driven HTML templates.
+Client-side only version of DerbyJS. Create components and data-driven HTML templates, reuse DerbyJS components inside your codebase.
 
 
 # Usage
