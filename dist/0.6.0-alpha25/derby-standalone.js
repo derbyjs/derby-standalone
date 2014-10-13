@@ -1,1853 +1,4 @@
-(function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);throw new Error("Cannot find module '"+o+"'")}var f=n[o]={exports:{}};t[o][0].call(f.exports,function(e){var n=t[o][1][e];return s(n?n:e)},f,f.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
-(function (global){
-var DerbyStandalone = require('derby/lib/DerbyStandalone');
-global.derby = module.exports = new DerbyStandalone();
-
-// Include template and expression parsing
-require('derby/node_modules/derby-parsing');
-
-}).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"derby/lib/DerbyStandalone":21,"derby/node_modules/derby-parsing":30}],2:[function(require,module,exports){
-/**
- * The buffer module from node.js, for the browser.
- *
- * Author:   Feross Aboukhadijeh <feross@feross.org> <http://feross.org>
- * License:  MIT
- *
- * `npm install buffer`
- */
-
-var base64 = require('base64-js')
-var ieee754 = require('ieee754')
-
-exports.Buffer = Buffer
-exports.SlowBuffer = Buffer
-exports.INSPECT_MAX_BYTES = 50
-Buffer.poolSize = 8192
-
-/**
- * If `Buffer._useTypedArrays`:
- *   === true    Use Uint8Array implementation (fastest)
- *   === false   Use Object implementation (compatible down to IE6)
- */
-Buffer._useTypedArrays = (function () {
-  // Detect if browser supports Typed Arrays. Supported browsers are IE 10+, Firefox 4+,
-  // Chrome 7+, Safari 5.1+, Opera 11.6+, iOS 4.2+. If the browser does not support adding
-  // properties to `Uint8Array` instances, then that's the same as no `Uint8Array` support
-  // because we need to be able to add all the node Buffer API methods. This is an issue
-  // in Firefox 4-29. Now fixed: https://bugzilla.mozilla.org/show_bug.cgi?id=695438
-  try {
-    var buf = new ArrayBuffer(0)
-    var arr = new Uint8Array(buf)
-    arr.foo = function () { return 42 }
-    return 42 === arr.foo() &&
-        typeof arr.subarray === 'function' // Chrome 9-10 lack `subarray`
-  } catch (e) {
-    return false
-  }
-})()
-
-/**
- * Class: Buffer
- * =============
- *
- * The Buffer constructor returns instances of `Uint8Array` that are augmented
- * with function properties for all the node `Buffer` API functions. We use
- * `Uint8Array` so that square bracket notation works as expected -- it returns
- * a single octet.
- *
- * By augmenting the instances, we can avoid modifying the `Uint8Array`
- * prototype.
- */
-function Buffer (subject, encoding, noZero) {
-  if (!(this instanceof Buffer))
-    return new Buffer(subject, encoding, noZero)
-
-  var type = typeof subject
-
-  // Workaround: node's base64 implementation allows for non-padded strings
-  // while base64-js does not.
-  if (encoding === 'base64' && type === 'string') {
-    subject = stringtrim(subject)
-    while (subject.length % 4 !== 0) {
-      subject = subject + '='
-    }
-  }
-
-  // Find the length
-  var length
-  if (type === 'number')
-    length = coerce(subject)
-  else if (type === 'string')
-    length = Buffer.byteLength(subject, encoding)
-  else if (type === 'object')
-    length = coerce(subject.length) // assume that object is array-like
-  else
-    throw new Error('First argument needs to be a number, array or string.')
-
-  var buf
-  if (Buffer._useTypedArrays) {
-    // Preferred: Return an augmented `Uint8Array` instance for best performance
-    buf = Buffer._augment(new Uint8Array(length))
-  } else {
-    // Fallback: Return THIS instance of Buffer (created by `new`)
-    buf = this
-    buf.length = length
-    buf._isBuffer = true
-  }
-
-  var i
-  if (Buffer._useTypedArrays && typeof subject.byteLength === 'number') {
-    // Speed optimization -- use set if we're copying from a typed array
-    buf._set(subject)
-  } else if (isArrayish(subject)) {
-    // Treat array-ish objects as a byte array
-    for (i = 0; i < length; i++) {
-      if (Buffer.isBuffer(subject))
-        buf[i] = subject.readUInt8(i)
-      else
-        buf[i] = subject[i]
-    }
-  } else if (type === 'string') {
-    buf.write(subject, 0, encoding)
-  } else if (type === 'number' && !Buffer._useTypedArrays && !noZero) {
-    for (i = 0; i < length; i++) {
-      buf[i] = 0
-    }
-  }
-
-  return buf
-}
-
-// STATIC METHODS
-// ==============
-
-Buffer.isEncoding = function (encoding) {
-  switch (String(encoding).toLowerCase()) {
-    case 'hex':
-    case 'utf8':
-    case 'utf-8':
-    case 'ascii':
-    case 'binary':
-    case 'base64':
-    case 'raw':
-    case 'ucs2':
-    case 'ucs-2':
-    case 'utf16le':
-    case 'utf-16le':
-      return true
-    default:
-      return false
-  }
-}
-
-Buffer.isBuffer = function (b) {
-  return !!(b !== null && b !== undefined && b._isBuffer)
-}
-
-Buffer.byteLength = function (str, encoding) {
-  var ret
-  str = str + ''
-  switch (encoding || 'utf8') {
-    case 'hex':
-      ret = str.length / 2
-      break
-    case 'utf8':
-    case 'utf-8':
-      ret = utf8ToBytes(str).length
-      break
-    case 'ascii':
-    case 'binary':
-    case 'raw':
-      ret = str.length
-      break
-    case 'base64':
-      ret = base64ToBytes(str).length
-      break
-    case 'ucs2':
-    case 'ucs-2':
-    case 'utf16le':
-    case 'utf-16le':
-      ret = str.length * 2
-      break
-    default:
-      throw new Error('Unknown encoding')
-  }
-  return ret
-}
-
-Buffer.concat = function (list, totalLength) {
-  assert(isArray(list), 'Usage: Buffer.concat(list, [totalLength])\n' +
-      'list should be an Array.')
-
-  if (list.length === 0) {
-    return new Buffer(0)
-  } else if (list.length === 1) {
-    return list[0]
-  }
-
-  var i
-  if (typeof totalLength !== 'number') {
-    totalLength = 0
-    for (i = 0; i < list.length; i++) {
-      totalLength += list[i].length
-    }
-  }
-
-  var buf = new Buffer(totalLength)
-  var pos = 0
-  for (i = 0; i < list.length; i++) {
-    var item = list[i]
-    item.copy(buf, pos)
-    pos += item.length
-  }
-  return buf
-}
-
-// BUFFER INSTANCE METHODS
-// =======================
-
-function _hexWrite (buf, string, offset, length) {
-  offset = Number(offset) || 0
-  var remaining = buf.length - offset
-  if (!length) {
-    length = remaining
-  } else {
-    length = Number(length)
-    if (length > remaining) {
-      length = remaining
-    }
-  }
-
-  // must be an even number of digits
-  var strLen = string.length
-  assert(strLen % 2 === 0, 'Invalid hex string')
-
-  if (length > strLen / 2) {
-    length = strLen / 2
-  }
-  for (var i = 0; i < length; i++) {
-    var byte = parseInt(string.substr(i * 2, 2), 16)
-    assert(!isNaN(byte), 'Invalid hex string')
-    buf[offset + i] = byte
-  }
-  Buffer._charsWritten = i * 2
-  return i
-}
-
-function _utf8Write (buf, string, offset, length) {
-  var charsWritten = Buffer._charsWritten =
-    blitBuffer(utf8ToBytes(string), buf, offset, length)
-  return charsWritten
-}
-
-function _asciiWrite (buf, string, offset, length) {
-  var charsWritten = Buffer._charsWritten =
-    blitBuffer(asciiToBytes(string), buf, offset, length)
-  return charsWritten
-}
-
-function _binaryWrite (buf, string, offset, length) {
-  return _asciiWrite(buf, string, offset, length)
-}
-
-function _base64Write (buf, string, offset, length) {
-  var charsWritten = Buffer._charsWritten =
-    blitBuffer(base64ToBytes(string), buf, offset, length)
-  return charsWritten
-}
-
-function _utf16leWrite (buf, string, offset, length) {
-  var charsWritten = Buffer._charsWritten =
-    blitBuffer(utf16leToBytes(string), buf, offset, length)
-  return charsWritten
-}
-
-Buffer.prototype.write = function (string, offset, length, encoding) {
-  // Support both (string, offset, length, encoding)
-  // and the legacy (string, encoding, offset, length)
-  if (isFinite(offset)) {
-    if (!isFinite(length)) {
-      encoding = length
-      length = undefined
-    }
-  } else {  // legacy
-    var swap = encoding
-    encoding = offset
-    offset = length
-    length = swap
-  }
-
-  offset = Number(offset) || 0
-  var remaining = this.length - offset
-  if (!length) {
-    length = remaining
-  } else {
-    length = Number(length)
-    if (length > remaining) {
-      length = remaining
-    }
-  }
-  encoding = String(encoding || 'utf8').toLowerCase()
-
-  var ret
-  switch (encoding) {
-    case 'hex':
-      ret = _hexWrite(this, string, offset, length)
-      break
-    case 'utf8':
-    case 'utf-8':
-      ret = _utf8Write(this, string, offset, length)
-      break
-    case 'ascii':
-      ret = _asciiWrite(this, string, offset, length)
-      break
-    case 'binary':
-      ret = _binaryWrite(this, string, offset, length)
-      break
-    case 'base64':
-      ret = _base64Write(this, string, offset, length)
-      break
-    case 'ucs2':
-    case 'ucs-2':
-    case 'utf16le':
-    case 'utf-16le':
-      ret = _utf16leWrite(this, string, offset, length)
-      break
-    default:
-      throw new Error('Unknown encoding')
-  }
-  return ret
-}
-
-Buffer.prototype.toString = function (encoding, start, end) {
-  var self = this
-
-  encoding = String(encoding || 'utf8').toLowerCase()
-  start = Number(start) || 0
-  end = (end !== undefined)
-    ? Number(end)
-    : end = self.length
-
-  // Fastpath empty strings
-  if (end === start)
-    return ''
-
-  var ret
-  switch (encoding) {
-    case 'hex':
-      ret = _hexSlice(self, start, end)
-      break
-    case 'utf8':
-    case 'utf-8':
-      ret = _utf8Slice(self, start, end)
-      break
-    case 'ascii':
-      ret = _asciiSlice(self, start, end)
-      break
-    case 'binary':
-      ret = _binarySlice(self, start, end)
-      break
-    case 'base64':
-      ret = _base64Slice(self, start, end)
-      break
-    case 'ucs2':
-    case 'ucs-2':
-    case 'utf16le':
-    case 'utf-16le':
-      ret = _utf16leSlice(self, start, end)
-      break
-    default:
-      throw new Error('Unknown encoding')
-  }
-  return ret
-}
-
-Buffer.prototype.toJSON = function () {
-  return {
-    type: 'Buffer',
-    data: Array.prototype.slice.call(this._arr || this, 0)
-  }
-}
-
-// copy(targetBuffer, targetStart=0, sourceStart=0, sourceEnd=buffer.length)
-Buffer.prototype.copy = function (target, target_start, start, end) {
-  var source = this
-
-  if (!start) start = 0
-  if (!end && end !== 0) end = this.length
-  if (!target_start) target_start = 0
-
-  // Copy 0 bytes; we're done
-  if (end === start) return
-  if (target.length === 0 || source.length === 0) return
-
-  // Fatal error conditions
-  assert(end >= start, 'sourceEnd < sourceStart')
-  assert(target_start >= 0 && target_start < target.length,
-      'targetStart out of bounds')
-  assert(start >= 0 && start < source.length, 'sourceStart out of bounds')
-  assert(end >= 0 && end <= source.length, 'sourceEnd out of bounds')
-
-  // Are we oob?
-  if (end > this.length)
-    end = this.length
-  if (target.length - target_start < end - start)
-    end = target.length - target_start + start
-
-  var len = end - start
-
-  if (len < 100 || !Buffer._useTypedArrays) {
-    for (var i = 0; i < len; i++)
-      target[i + target_start] = this[i + start]
-  } else {
-    target._set(this.subarray(start, start + len), target_start)
-  }
-}
-
-function _base64Slice (buf, start, end) {
-  if (start === 0 && end === buf.length) {
-    return base64.fromByteArray(buf)
-  } else {
-    return base64.fromByteArray(buf.slice(start, end))
-  }
-}
-
-function _utf8Slice (buf, start, end) {
-  var res = ''
-  var tmp = ''
-  end = Math.min(buf.length, end)
-
-  for (var i = start; i < end; i++) {
-    if (buf[i] <= 0x7F) {
-      res += decodeUtf8Char(tmp) + String.fromCharCode(buf[i])
-      tmp = ''
-    } else {
-      tmp += '%' + buf[i].toString(16)
-    }
-  }
-
-  return res + decodeUtf8Char(tmp)
-}
-
-function _asciiSlice (buf, start, end) {
-  var ret = ''
-  end = Math.min(buf.length, end)
-
-  for (var i = start; i < end; i++)
-    ret += String.fromCharCode(buf[i])
-  return ret
-}
-
-function _binarySlice (buf, start, end) {
-  return _asciiSlice(buf, start, end)
-}
-
-function _hexSlice (buf, start, end) {
-  var len = buf.length
-
-  if (!start || start < 0) start = 0
-  if (!end || end < 0 || end > len) end = len
-
-  var out = ''
-  for (var i = start; i < end; i++) {
-    out += toHex(buf[i])
-  }
-  return out
-}
-
-function _utf16leSlice (buf, start, end) {
-  var bytes = buf.slice(start, end)
-  var res = ''
-  for (var i = 0; i < bytes.length; i += 2) {
-    res += String.fromCharCode(bytes[i] + bytes[i+1] * 256)
-  }
-  return res
-}
-
-Buffer.prototype.slice = function (start, end) {
-  var len = this.length
-  start = clamp(start, len, 0)
-  end = clamp(end, len, len)
-
-  if (Buffer._useTypedArrays) {
-    return Buffer._augment(this.subarray(start, end))
-  } else {
-    var sliceLen = end - start
-    var newBuf = new Buffer(sliceLen, undefined, true)
-    for (var i = 0; i < sliceLen; i++) {
-      newBuf[i] = this[i + start]
-    }
-    return newBuf
-  }
-}
-
-// `get` will be removed in Node 0.13+
-Buffer.prototype.get = function (offset) {
-  console.log('.get() is deprecated. Access using array indexes instead.')
-  return this.readUInt8(offset)
-}
-
-// `set` will be removed in Node 0.13+
-Buffer.prototype.set = function (v, offset) {
-  console.log('.set() is deprecated. Access using array indexes instead.')
-  return this.writeUInt8(v, offset)
-}
-
-Buffer.prototype.readUInt8 = function (offset, noAssert) {
-  if (!noAssert) {
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset < this.length, 'Trying to read beyond buffer length')
-  }
-
-  if (offset >= this.length)
-    return
-
-  return this[offset]
-}
-
-function _readUInt16 (buf, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 1 < buf.length, 'Trying to read beyond buffer length')
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  var val
-  if (littleEndian) {
-    val = buf[offset]
-    if (offset + 1 < len)
-      val |= buf[offset + 1] << 8
-  } else {
-    val = buf[offset] << 8
-    if (offset + 1 < len)
-      val |= buf[offset + 1]
-  }
-  return val
-}
-
-Buffer.prototype.readUInt16LE = function (offset, noAssert) {
-  return _readUInt16(this, offset, true, noAssert)
-}
-
-Buffer.prototype.readUInt16BE = function (offset, noAssert) {
-  return _readUInt16(this, offset, false, noAssert)
-}
-
-function _readUInt32 (buf, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 3 < buf.length, 'Trying to read beyond buffer length')
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  var val
-  if (littleEndian) {
-    if (offset + 2 < len)
-      val = buf[offset + 2] << 16
-    if (offset + 1 < len)
-      val |= buf[offset + 1] << 8
-    val |= buf[offset]
-    if (offset + 3 < len)
-      val = val + (buf[offset + 3] << 24 >>> 0)
-  } else {
-    if (offset + 1 < len)
-      val = buf[offset + 1] << 16
-    if (offset + 2 < len)
-      val |= buf[offset + 2] << 8
-    if (offset + 3 < len)
-      val |= buf[offset + 3]
-    val = val + (buf[offset] << 24 >>> 0)
-  }
-  return val
-}
-
-Buffer.prototype.readUInt32LE = function (offset, noAssert) {
-  return _readUInt32(this, offset, true, noAssert)
-}
-
-Buffer.prototype.readUInt32BE = function (offset, noAssert) {
-  return _readUInt32(this, offset, false, noAssert)
-}
-
-Buffer.prototype.readInt8 = function (offset, noAssert) {
-  if (!noAssert) {
-    assert(offset !== undefined && offset !== null,
-        'missing offset')
-    assert(offset < this.length, 'Trying to read beyond buffer length')
-  }
-
-  if (offset >= this.length)
-    return
-
-  var neg = this[offset] & 0x80
-  if (neg)
-    return (0xff - this[offset] + 1) * -1
-  else
-    return this[offset]
-}
-
-function _readInt16 (buf, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 1 < buf.length, 'Trying to read beyond buffer length')
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  var val = _readUInt16(buf, offset, littleEndian, true)
-  var neg = val & 0x8000
-  if (neg)
-    return (0xffff - val + 1) * -1
-  else
-    return val
-}
-
-Buffer.prototype.readInt16LE = function (offset, noAssert) {
-  return _readInt16(this, offset, true, noAssert)
-}
-
-Buffer.prototype.readInt16BE = function (offset, noAssert) {
-  return _readInt16(this, offset, false, noAssert)
-}
-
-function _readInt32 (buf, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 3 < buf.length, 'Trying to read beyond buffer length')
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  var val = _readUInt32(buf, offset, littleEndian, true)
-  var neg = val & 0x80000000
-  if (neg)
-    return (0xffffffff - val + 1) * -1
-  else
-    return val
-}
-
-Buffer.prototype.readInt32LE = function (offset, noAssert) {
-  return _readInt32(this, offset, true, noAssert)
-}
-
-Buffer.prototype.readInt32BE = function (offset, noAssert) {
-  return _readInt32(this, offset, false, noAssert)
-}
-
-function _readFloat (buf, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset + 3 < buf.length, 'Trying to read beyond buffer length')
-  }
-
-  return ieee754.read(buf, offset, littleEndian, 23, 4)
-}
-
-Buffer.prototype.readFloatLE = function (offset, noAssert) {
-  return _readFloat(this, offset, true, noAssert)
-}
-
-Buffer.prototype.readFloatBE = function (offset, noAssert) {
-  return _readFloat(this, offset, false, noAssert)
-}
-
-function _readDouble (buf, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset + 7 < buf.length, 'Trying to read beyond buffer length')
-  }
-
-  return ieee754.read(buf, offset, littleEndian, 52, 8)
-}
-
-Buffer.prototype.readDoubleLE = function (offset, noAssert) {
-  return _readDouble(this, offset, true, noAssert)
-}
-
-Buffer.prototype.readDoubleBE = function (offset, noAssert) {
-  return _readDouble(this, offset, false, noAssert)
-}
-
-Buffer.prototype.writeUInt8 = function (value, offset, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset < this.length, 'trying to write beyond buffer length')
-    verifuint(value, 0xff)
-  }
-
-  if (offset >= this.length) return
-
-  this[offset] = value
-}
-
-function _writeUInt16 (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 1 < buf.length, 'trying to write beyond buffer length')
-    verifuint(value, 0xffff)
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  for (var i = 0, j = Math.min(len - offset, 2); i < j; i++) {
-    buf[offset + i] =
-        (value & (0xff << (8 * (littleEndian ? i : 1 - i)))) >>>
-            (littleEndian ? i : 1 - i) * 8
-  }
-}
-
-Buffer.prototype.writeUInt16LE = function (value, offset, noAssert) {
-  _writeUInt16(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeUInt16BE = function (value, offset, noAssert) {
-  _writeUInt16(this, value, offset, false, noAssert)
-}
-
-function _writeUInt32 (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 3 < buf.length, 'trying to write beyond buffer length')
-    verifuint(value, 0xffffffff)
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  for (var i = 0, j = Math.min(len - offset, 4); i < j; i++) {
-    buf[offset + i] =
-        (value >>> (littleEndian ? i : 3 - i) * 8) & 0xff
-  }
-}
-
-Buffer.prototype.writeUInt32LE = function (value, offset, noAssert) {
-  _writeUInt32(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeUInt32BE = function (value, offset, noAssert) {
-  _writeUInt32(this, value, offset, false, noAssert)
-}
-
-Buffer.prototype.writeInt8 = function (value, offset, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset < this.length, 'Trying to write beyond buffer length')
-    verifsint(value, 0x7f, -0x80)
-  }
-
-  if (offset >= this.length)
-    return
-
-  if (value >= 0)
-    this.writeUInt8(value, offset, noAssert)
-  else
-    this.writeUInt8(0xff + value + 1, offset, noAssert)
-}
-
-function _writeInt16 (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 1 < buf.length, 'Trying to write beyond buffer length')
-    verifsint(value, 0x7fff, -0x8000)
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  if (value >= 0)
-    _writeUInt16(buf, value, offset, littleEndian, noAssert)
-  else
-    _writeUInt16(buf, 0xffff + value + 1, offset, littleEndian, noAssert)
-}
-
-Buffer.prototype.writeInt16LE = function (value, offset, noAssert) {
-  _writeInt16(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeInt16BE = function (value, offset, noAssert) {
-  _writeInt16(this, value, offset, false, noAssert)
-}
-
-function _writeInt32 (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 3 < buf.length, 'Trying to write beyond buffer length')
-    verifsint(value, 0x7fffffff, -0x80000000)
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  if (value >= 0)
-    _writeUInt32(buf, value, offset, littleEndian, noAssert)
-  else
-    _writeUInt32(buf, 0xffffffff + value + 1, offset, littleEndian, noAssert)
-}
-
-Buffer.prototype.writeInt32LE = function (value, offset, noAssert) {
-  _writeInt32(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeInt32BE = function (value, offset, noAssert) {
-  _writeInt32(this, value, offset, false, noAssert)
-}
-
-function _writeFloat (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 3 < buf.length, 'Trying to write beyond buffer length')
-    verifIEEE754(value, 3.4028234663852886e+38, -3.4028234663852886e+38)
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  ieee754.write(buf, value, offset, littleEndian, 23, 4)
-}
-
-Buffer.prototype.writeFloatLE = function (value, offset, noAssert) {
-  _writeFloat(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeFloatBE = function (value, offset, noAssert) {
-  _writeFloat(this, value, offset, false, noAssert)
-}
-
-function _writeDouble (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 7 < buf.length,
-        'Trying to write beyond buffer length')
-    verifIEEE754(value, 1.7976931348623157E+308, -1.7976931348623157E+308)
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  ieee754.write(buf, value, offset, littleEndian, 52, 8)
-}
-
-Buffer.prototype.writeDoubleLE = function (value, offset, noAssert) {
-  _writeDouble(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeDoubleBE = function (value, offset, noAssert) {
-  _writeDouble(this, value, offset, false, noAssert)
-}
-
-// fill(value, start=0, end=buffer.length)
-Buffer.prototype.fill = function (value, start, end) {
-  if (!value) value = 0
-  if (!start) start = 0
-  if (!end) end = this.length
-
-  if (typeof value === 'string') {
-    value = value.charCodeAt(0)
-  }
-
-  assert(typeof value === 'number' && !isNaN(value), 'value is not a number')
-  assert(end >= start, 'end < start')
-
-  // Fill 0 bytes; we're done
-  if (end === start) return
-  if (this.length === 0) return
-
-  assert(start >= 0 && start < this.length, 'start out of bounds')
-  assert(end >= 0 && end <= this.length, 'end out of bounds')
-
-  for (var i = start; i < end; i++) {
-    this[i] = value
-  }
-}
-
-Buffer.prototype.inspect = function () {
-  var out = []
-  var len = this.length
-  for (var i = 0; i < len; i++) {
-    out[i] = toHex(this[i])
-    if (i === exports.INSPECT_MAX_BYTES) {
-      out[i + 1] = '...'
-      break
-    }
-  }
-  return '<Buffer ' + out.join(' ') + '>'
-}
-
-/**
- * Creates a new `ArrayBuffer` with the *copied* memory of the buffer instance.
- * Added in Node 0.12. Only available in browsers that support ArrayBuffer.
- */
-Buffer.prototype.toArrayBuffer = function () {
-  if (typeof Uint8Array !== 'undefined') {
-    if (Buffer._useTypedArrays) {
-      return (new Buffer(this)).buffer
-    } else {
-      var buf = new Uint8Array(this.length)
-      for (var i = 0, len = buf.length; i < len; i += 1)
-        buf[i] = this[i]
-      return buf.buffer
-    }
-  } else {
-    throw new Error('Buffer.toArrayBuffer not supported in this browser')
-  }
-}
-
-// HELPER FUNCTIONS
-// ================
-
-function stringtrim (str) {
-  if (str.trim) return str.trim()
-  return str.replace(/^\s+|\s+$/g, '')
-}
-
-var BP = Buffer.prototype
-
-/**
- * Augment a Uint8Array *instance* (not the Uint8Array class!) with Buffer methods
- */
-Buffer._augment = function (arr) {
-  arr._isBuffer = true
-
-  // save reference to original Uint8Array get/set methods before overwriting
-  arr._get = arr.get
-  arr._set = arr.set
-
-  // deprecated, will be removed in node 0.13+
-  arr.get = BP.get
-  arr.set = BP.set
-
-  arr.write = BP.write
-  arr.toString = BP.toString
-  arr.toLocaleString = BP.toString
-  arr.toJSON = BP.toJSON
-  arr.copy = BP.copy
-  arr.slice = BP.slice
-  arr.readUInt8 = BP.readUInt8
-  arr.readUInt16LE = BP.readUInt16LE
-  arr.readUInt16BE = BP.readUInt16BE
-  arr.readUInt32LE = BP.readUInt32LE
-  arr.readUInt32BE = BP.readUInt32BE
-  arr.readInt8 = BP.readInt8
-  arr.readInt16LE = BP.readInt16LE
-  arr.readInt16BE = BP.readInt16BE
-  arr.readInt32LE = BP.readInt32LE
-  arr.readInt32BE = BP.readInt32BE
-  arr.readFloatLE = BP.readFloatLE
-  arr.readFloatBE = BP.readFloatBE
-  arr.readDoubleLE = BP.readDoubleLE
-  arr.readDoubleBE = BP.readDoubleBE
-  arr.writeUInt8 = BP.writeUInt8
-  arr.writeUInt16LE = BP.writeUInt16LE
-  arr.writeUInt16BE = BP.writeUInt16BE
-  arr.writeUInt32LE = BP.writeUInt32LE
-  arr.writeUInt32BE = BP.writeUInt32BE
-  arr.writeInt8 = BP.writeInt8
-  arr.writeInt16LE = BP.writeInt16LE
-  arr.writeInt16BE = BP.writeInt16BE
-  arr.writeInt32LE = BP.writeInt32LE
-  arr.writeInt32BE = BP.writeInt32BE
-  arr.writeFloatLE = BP.writeFloatLE
-  arr.writeFloatBE = BP.writeFloatBE
-  arr.writeDoubleLE = BP.writeDoubleLE
-  arr.writeDoubleBE = BP.writeDoubleBE
-  arr.fill = BP.fill
-  arr.inspect = BP.inspect
-  arr.toArrayBuffer = BP.toArrayBuffer
-
-  return arr
-}
-
-// slice(start, end)
-function clamp (index, len, defaultValue) {
-  if (typeof index !== 'number') return defaultValue
-  index = ~~index;  // Coerce to integer.
-  if (index >= len) return len
-  if (index >= 0) return index
-  index += len
-  if (index >= 0) return index
-  return 0
-}
-
-function coerce (length) {
-  // Coerce length to a number (possibly NaN), round up
-  // in case it's fractional (e.g. 123.456) then do a
-  // double negate to coerce a NaN to 0. Easy, right?
-  length = ~~Math.ceil(+length)
-  return length < 0 ? 0 : length
-}
-
-function isArray (subject) {
-  return (Array.isArray || function (subject) {
-    return Object.prototype.toString.call(subject) === '[object Array]'
-  })(subject)
-}
-
-function isArrayish (subject) {
-  return isArray(subject) || Buffer.isBuffer(subject) ||
-      subject && typeof subject === 'object' &&
-      typeof subject.length === 'number'
-}
-
-function toHex (n) {
-  if (n < 16) return '0' + n.toString(16)
-  return n.toString(16)
-}
-
-function utf8ToBytes (str) {
-  var byteArray = []
-  for (var i = 0; i < str.length; i++) {
-    var b = str.charCodeAt(i)
-    if (b <= 0x7F)
-      byteArray.push(str.charCodeAt(i))
-    else {
-      var start = i
-      if (b >= 0xD800 && b <= 0xDFFF) i++
-      var h = encodeURIComponent(str.slice(start, i+1)).substr(1).split('%')
-      for (var j = 0; j < h.length; j++)
-        byteArray.push(parseInt(h[j], 16))
-    }
-  }
-  return byteArray
-}
-
-function asciiToBytes (str) {
-  var byteArray = []
-  for (var i = 0; i < str.length; i++) {
-    // Node's code seems to be doing this and not & 0x7F..
-    byteArray.push(str.charCodeAt(i) & 0xFF)
-  }
-  return byteArray
-}
-
-function utf16leToBytes (str) {
-  var c, hi, lo
-  var byteArray = []
-  for (var i = 0; i < str.length; i++) {
-    c = str.charCodeAt(i)
-    hi = c >> 8
-    lo = c % 256
-    byteArray.push(lo)
-    byteArray.push(hi)
-  }
-
-  return byteArray
-}
-
-function base64ToBytes (str) {
-  return base64.toByteArray(str)
-}
-
-function blitBuffer (src, dst, offset, length) {
-  var pos
-  for (var i = 0; i < length; i++) {
-    if ((i + offset >= dst.length) || (i >= src.length))
-      break
-    dst[i + offset] = src[i]
-  }
-  return i
-}
-
-function decodeUtf8Char (str) {
-  try {
-    return decodeURIComponent(str)
-  } catch (err) {
-    return String.fromCharCode(0xFFFD) // UTF 8 invalid char
-  }
-}
-
-/*
- * We have to make sure that the value is a valid integer. This means that it
- * is non-negative. It has no fractional component and that it does not
- * exceed the maximum allowed value.
- */
-function verifuint (value, max) {
-  assert(typeof value === 'number', 'cannot write a non-number as a number')
-  assert(value >= 0, 'specified a negative value for writing an unsigned value')
-  assert(value <= max, 'value is larger than maximum value for type')
-  assert(Math.floor(value) === value, 'value has a fractional component')
-}
-
-function verifsint (value, max, min) {
-  assert(typeof value === 'number', 'cannot write a non-number as a number')
-  assert(value <= max, 'value larger than maximum allowed value')
-  assert(value >= min, 'value smaller than minimum allowed value')
-  assert(Math.floor(value) === value, 'value has a fractional component')
-}
-
-function verifIEEE754 (value, max, min) {
-  assert(typeof value === 'number', 'cannot write a non-number as a number')
-  assert(value <= max, 'value larger than maximum allowed value')
-  assert(value >= min, 'value smaller than minimum allowed value')
-}
-
-function assert (test, message) {
-  if (!test) throw new Error(message || 'Failed assertion')
-}
-
-},{"base64-js":3,"ieee754":4}],3:[function(require,module,exports){
-var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-;(function (exports) {
-	'use strict';
-
-  var Arr = (typeof Uint8Array !== 'undefined')
-    ? Uint8Array
-    : Array
-
-	var ZERO   = '0'.charCodeAt(0)
-	var PLUS   = '+'.charCodeAt(0)
-	var SLASH  = '/'.charCodeAt(0)
-	var NUMBER = '0'.charCodeAt(0)
-	var LOWER  = 'a'.charCodeAt(0)
-	var UPPER  = 'A'.charCodeAt(0)
-
-	function decode (elt) {
-		var code = elt.charCodeAt(0)
-		if (code === PLUS)
-			return 62 // '+'
-		if (code === SLASH)
-			return 63 // '/'
-		if (code < NUMBER)
-			return -1 //no match
-		if (code < NUMBER + 10)
-			return code - NUMBER + 26 + 26
-		if (code < UPPER + 26)
-			return code - UPPER
-		if (code < LOWER + 26)
-			return code - LOWER + 26
-	}
-
-	function b64ToByteArray (b64) {
-		var i, j, l, tmp, placeHolders, arr
-
-		if (b64.length % 4 > 0) {
-			throw new Error('Invalid string. Length must be a multiple of 4')
-		}
-
-		// the number of equal signs (place holders)
-		// if there are two placeholders, than the two characters before it
-		// represent one byte
-		// if there is only one, then the three characters before it represent 2 bytes
-		// this is just a cheap hack to not do indexOf twice
-		var len = b64.length
-		placeHolders = '=' === b64.charAt(len - 2) ? 2 : '=' === b64.charAt(len - 1) ? 1 : 0
-
-		// base64 is 4/3 + up to two characters of the original data
-		arr = new Arr(b64.length * 3 / 4 - placeHolders)
-
-		// if there are placeholders, only get up to the last complete 4 chars
-		l = placeHolders > 0 ? b64.length - 4 : b64.length
-
-		var L = 0
-
-		function push (v) {
-			arr[L++] = v
-		}
-
-		for (i = 0, j = 0; i < l; i += 4, j += 3) {
-			tmp = (decode(b64.charAt(i)) << 18) | (decode(b64.charAt(i + 1)) << 12) | (decode(b64.charAt(i + 2)) << 6) | decode(b64.charAt(i + 3))
-			push((tmp & 0xFF0000) >> 16)
-			push((tmp & 0xFF00) >> 8)
-			push(tmp & 0xFF)
-		}
-
-		if (placeHolders === 2) {
-			tmp = (decode(b64.charAt(i)) << 2) | (decode(b64.charAt(i + 1)) >> 4)
-			push(tmp & 0xFF)
-		} else if (placeHolders === 1) {
-			tmp = (decode(b64.charAt(i)) << 10) | (decode(b64.charAt(i + 1)) << 4) | (decode(b64.charAt(i + 2)) >> 2)
-			push((tmp >> 8) & 0xFF)
-			push(tmp & 0xFF)
-		}
-
-		return arr
-	}
-
-	function uint8ToBase64 (uint8) {
-		var i,
-			extraBytes = uint8.length % 3, // if we have 1 byte left, pad 2 bytes
-			output = "",
-			temp, length
-
-		function encode (num) {
-			return lookup.charAt(num)
-		}
-
-		function tripletToBase64 (num) {
-			return encode(num >> 18 & 0x3F) + encode(num >> 12 & 0x3F) + encode(num >> 6 & 0x3F) + encode(num & 0x3F)
-		}
-
-		// go through the array every three bytes, we'll deal with trailing stuff later
-		for (i = 0, length = uint8.length - extraBytes; i < length; i += 3) {
-			temp = (uint8[i] << 16) + (uint8[i + 1] << 8) + (uint8[i + 2])
-			output += tripletToBase64(temp)
-		}
-
-		// pad the end with zeros, but make sure to not forget the extra bytes
-		switch (extraBytes) {
-			case 1:
-				temp = uint8[uint8.length - 1]
-				output += encode(temp >> 2)
-				output += encode((temp << 4) & 0x3F)
-				output += '=='
-				break
-			case 2:
-				temp = (uint8[uint8.length - 2] << 8) + (uint8[uint8.length - 1])
-				output += encode(temp >> 10)
-				output += encode((temp >> 4) & 0x3F)
-				output += encode((temp << 2) & 0x3F)
-				output += '='
-				break
-		}
-
-		return output
-	}
-
-	module.exports.toByteArray = b64ToByteArray
-	module.exports.fromByteArray = uint8ToBase64
-}())
-
-},{}],4:[function(require,module,exports){
-exports.read = function(buffer, offset, isLE, mLen, nBytes) {
-  var e, m,
-      eLen = nBytes * 8 - mLen - 1,
-      eMax = (1 << eLen) - 1,
-      eBias = eMax >> 1,
-      nBits = -7,
-      i = isLE ? (nBytes - 1) : 0,
-      d = isLE ? -1 : 1,
-      s = buffer[offset + i];
-
-  i += d;
-
-  e = s & ((1 << (-nBits)) - 1);
-  s >>= (-nBits);
-  nBits += eLen;
-  for (; nBits > 0; e = e * 256 + buffer[offset + i], i += d, nBits -= 8);
-
-  m = e & ((1 << (-nBits)) - 1);
-  e >>= (-nBits);
-  nBits += mLen;
-  for (; nBits > 0; m = m * 256 + buffer[offset + i], i += d, nBits -= 8);
-
-  if (e === 0) {
-    e = 1 - eBias;
-  } else if (e === eMax) {
-    return m ? NaN : ((s ? -1 : 1) * Infinity);
-  } else {
-    m = m + Math.pow(2, mLen);
-    e = e - eBias;
-  }
-  return (s ? -1 : 1) * m * Math.pow(2, e - mLen);
-};
-
-exports.write = function(buffer, value, offset, isLE, mLen, nBytes) {
-  var e, m, c,
-      eLen = nBytes * 8 - mLen - 1,
-      eMax = (1 << eLen) - 1,
-      eBias = eMax >> 1,
-      rt = (mLen === 23 ? Math.pow(2, -24) - Math.pow(2, -77) : 0),
-      i = isLE ? 0 : (nBytes - 1),
-      d = isLE ? 1 : -1,
-      s = value < 0 || (value === 0 && 1 / value < 0) ? 1 : 0;
-
-  value = Math.abs(value);
-
-  if (isNaN(value) || value === Infinity) {
-    m = isNaN(value) ? 1 : 0;
-    e = eMax;
-  } else {
-    e = Math.floor(Math.log(value) / Math.LN2);
-    if (value * (c = Math.pow(2, -e)) < 1) {
-      e--;
-      c *= 2;
-    }
-    if (e + eBias >= 1) {
-      value += rt / c;
-    } else {
-      value += rt * Math.pow(2, 1 - eBias);
-    }
-    if (value * c >= 2) {
-      e++;
-      c /= 2;
-    }
-
-    if (e + eBias >= eMax) {
-      m = 0;
-      e = eMax;
-    } else if (e + eBias >= 1) {
-      m = (value * c - 1) * Math.pow(2, mLen);
-      e = e + eBias;
-    } else {
-      m = value * Math.pow(2, eBias - 1) * Math.pow(2, mLen);
-      e = 0;
-    }
-  }
-
-  for (; mLen >= 8; buffer[offset + i] = m & 0xff, i += d, m /= 256, mLen -= 8);
-
-  e = (e << mLen) | m;
-  eLen += mLen;
-  for (; eLen > 0; buffer[offset + i] = e & 0xff, i += d, e /= 256, eLen -= 8);
-
-  buffer[offset + i - d] |= s * 128;
-};
-
-},{}],5:[function(require,module,exports){
-var Buffer = require('buffer').Buffer;
-var intSize = 4;
-var zeroBuffer = new Buffer(intSize); zeroBuffer.fill(0);
-var chrsz = 8;
-
-function toArray(buf, bigEndian) {
-  if ((buf.length % intSize) !== 0) {
-    var len = buf.length + (intSize - (buf.length % intSize));
-    buf = Buffer.concat([buf, zeroBuffer], len);
-  }
-
-  var arr = [];
-  var fn = bigEndian ? buf.readInt32BE : buf.readInt32LE;
-  for (var i = 0; i < buf.length; i += intSize) {
-    arr.push(fn.call(buf, i));
-  }
-  return arr;
-}
-
-function toBuffer(arr, size, bigEndian) {
-  var buf = new Buffer(size);
-  var fn = bigEndian ? buf.writeInt32BE : buf.writeInt32LE;
-  for (var i = 0; i < arr.length; i++) {
-    fn.call(buf, arr[i], i * 4, true);
-  }
-  return buf;
-}
-
-function hash(buf, fn, hashSize, bigEndian) {
-  if (!Buffer.isBuffer(buf)) buf = new Buffer(buf);
-  var arr = fn(toArray(buf, bigEndian), buf.length * chrsz);
-  return toBuffer(arr, hashSize, bigEndian);
-}
-
-module.exports = { hash: hash };
-
-},{"buffer":2}],6:[function(require,module,exports){
-var Buffer = require('buffer').Buffer
-var sha = require('./sha')
-var sha256 = require('./sha256')
-var rng = require('./rng')
-var md5 = require('./md5')
-
-var algorithms = {
-  sha1: sha,
-  sha256: sha256,
-  md5: md5
-}
-
-var blocksize = 64
-var zeroBuffer = new Buffer(blocksize); zeroBuffer.fill(0)
-function hmac(fn, key, data) {
-  if(!Buffer.isBuffer(key)) key = new Buffer(key)
-  if(!Buffer.isBuffer(data)) data = new Buffer(data)
-
-  if(key.length > blocksize) {
-    key = fn(key)
-  } else if(key.length < blocksize) {
-    key = Buffer.concat([key, zeroBuffer], blocksize)
-  }
-
-  var ipad = new Buffer(blocksize), opad = new Buffer(blocksize)
-  for(var i = 0; i < blocksize; i++) {
-    ipad[i] = key[i] ^ 0x36
-    opad[i] = key[i] ^ 0x5C
-  }
-
-  var hash = fn(Buffer.concat([ipad, data]))
-  return fn(Buffer.concat([opad, hash]))
-}
-
-function hash(alg, key) {
-  alg = alg || 'sha1'
-  var fn = algorithms[alg]
-  var bufs = []
-  var length = 0
-  if(!fn) error('algorithm:', alg, 'is not yet supported')
-  return {
-    update: function (data) {
-      if(!Buffer.isBuffer(data)) data = new Buffer(data)
-        
-      bufs.push(data)
-      length += data.length
-      return this
-    },
-    digest: function (enc) {
-      var buf = Buffer.concat(bufs)
-      var r = key ? hmac(fn, key, buf) : fn(buf)
-      bufs = null
-      return enc ? r.toString(enc) : r
-    }
-  }
-}
-
-function error () {
-  var m = [].slice.call(arguments).join(' ')
-  throw new Error([
-    m,
-    'we accept pull requests',
-    'http://github.com/dominictarr/crypto-browserify'
-    ].join('\n'))
-}
-
-exports.createHash = function (alg) { return hash(alg) }
-exports.createHmac = function (alg, key) { return hash(alg, key) }
-exports.randomBytes = function(size, callback) {
-  if (callback && callback.call) {
-    try {
-      callback.call(this, undefined, new Buffer(rng(size)))
-    } catch (err) { callback(err) }
-  } else {
-    return new Buffer(rng(size))
-  }
-}
-
-function each(a, f) {
-  for(var i in a)
-    f(a[i], i)
-}
-
-// the least I can do is make error messages for the rest of the node.js/crypto api.
-each(['createCredentials'
-, 'createCipher'
-, 'createCipheriv'
-, 'createDecipher'
-, 'createDecipheriv'
-, 'createSign'
-, 'createVerify'
-, 'createDiffieHellman'
-, 'pbkdf2'], function (name) {
-  exports[name] = function () {
-    error('sorry,', name, 'is not implemented yet')
-  }
-})
-
-},{"./md5":7,"./rng":8,"./sha":9,"./sha256":10,"buffer":2}],7:[function(require,module,exports){
-/*
- * A JavaScript implementation of the RSA Data Security, Inc. MD5 Message
- * Digest Algorithm, as defined in RFC 1321.
- * Version 2.1 Copyright (C) Paul Johnston 1999 - 2002.
- * Other contributors: Greg Holt, Andrew Kepert, Ydnar, Lostinet
- * Distributed under the BSD License
- * See http://pajhome.org.uk/crypt/md5 for more info.
- */
-
-var helpers = require('./helpers');
-
-/*
- * Perform a simple self-test to see if the VM is working
- */
-function md5_vm_test()
-{
-  return hex_md5("abc") == "900150983cd24fb0d6963f7d28e17f72";
-}
-
-/*
- * Calculate the MD5 of an array of little-endian words, and a bit length
- */
-function core_md5(x, len)
-{
-  /* append padding */
-  x[len >> 5] |= 0x80 << ((len) % 32);
-  x[(((len + 64) >>> 9) << 4) + 14] = len;
-
-  var a =  1732584193;
-  var b = -271733879;
-  var c = -1732584194;
-  var d =  271733878;
-
-  for(var i = 0; i < x.length; i += 16)
-  {
-    var olda = a;
-    var oldb = b;
-    var oldc = c;
-    var oldd = d;
-
-    a = md5_ff(a, b, c, d, x[i+ 0], 7 , -680876936);
-    d = md5_ff(d, a, b, c, x[i+ 1], 12, -389564586);
-    c = md5_ff(c, d, a, b, x[i+ 2], 17,  606105819);
-    b = md5_ff(b, c, d, a, x[i+ 3], 22, -1044525330);
-    a = md5_ff(a, b, c, d, x[i+ 4], 7 , -176418897);
-    d = md5_ff(d, a, b, c, x[i+ 5], 12,  1200080426);
-    c = md5_ff(c, d, a, b, x[i+ 6], 17, -1473231341);
-    b = md5_ff(b, c, d, a, x[i+ 7], 22, -45705983);
-    a = md5_ff(a, b, c, d, x[i+ 8], 7 ,  1770035416);
-    d = md5_ff(d, a, b, c, x[i+ 9], 12, -1958414417);
-    c = md5_ff(c, d, a, b, x[i+10], 17, -42063);
-    b = md5_ff(b, c, d, a, x[i+11], 22, -1990404162);
-    a = md5_ff(a, b, c, d, x[i+12], 7 ,  1804603682);
-    d = md5_ff(d, a, b, c, x[i+13], 12, -40341101);
-    c = md5_ff(c, d, a, b, x[i+14], 17, -1502002290);
-    b = md5_ff(b, c, d, a, x[i+15], 22,  1236535329);
-
-    a = md5_gg(a, b, c, d, x[i+ 1], 5 , -165796510);
-    d = md5_gg(d, a, b, c, x[i+ 6], 9 , -1069501632);
-    c = md5_gg(c, d, a, b, x[i+11], 14,  643717713);
-    b = md5_gg(b, c, d, a, x[i+ 0], 20, -373897302);
-    a = md5_gg(a, b, c, d, x[i+ 5], 5 , -701558691);
-    d = md5_gg(d, a, b, c, x[i+10], 9 ,  38016083);
-    c = md5_gg(c, d, a, b, x[i+15], 14, -660478335);
-    b = md5_gg(b, c, d, a, x[i+ 4], 20, -405537848);
-    a = md5_gg(a, b, c, d, x[i+ 9], 5 ,  568446438);
-    d = md5_gg(d, a, b, c, x[i+14], 9 , -1019803690);
-    c = md5_gg(c, d, a, b, x[i+ 3], 14, -187363961);
-    b = md5_gg(b, c, d, a, x[i+ 8], 20,  1163531501);
-    a = md5_gg(a, b, c, d, x[i+13], 5 , -1444681467);
-    d = md5_gg(d, a, b, c, x[i+ 2], 9 , -51403784);
-    c = md5_gg(c, d, a, b, x[i+ 7], 14,  1735328473);
-    b = md5_gg(b, c, d, a, x[i+12], 20, -1926607734);
-
-    a = md5_hh(a, b, c, d, x[i+ 5], 4 , -378558);
-    d = md5_hh(d, a, b, c, x[i+ 8], 11, -2022574463);
-    c = md5_hh(c, d, a, b, x[i+11], 16,  1839030562);
-    b = md5_hh(b, c, d, a, x[i+14], 23, -35309556);
-    a = md5_hh(a, b, c, d, x[i+ 1], 4 , -1530992060);
-    d = md5_hh(d, a, b, c, x[i+ 4], 11,  1272893353);
-    c = md5_hh(c, d, a, b, x[i+ 7], 16, -155497632);
-    b = md5_hh(b, c, d, a, x[i+10], 23, -1094730640);
-    a = md5_hh(a, b, c, d, x[i+13], 4 ,  681279174);
-    d = md5_hh(d, a, b, c, x[i+ 0], 11, -358537222);
-    c = md5_hh(c, d, a, b, x[i+ 3], 16, -722521979);
-    b = md5_hh(b, c, d, a, x[i+ 6], 23,  76029189);
-    a = md5_hh(a, b, c, d, x[i+ 9], 4 , -640364487);
-    d = md5_hh(d, a, b, c, x[i+12], 11, -421815835);
-    c = md5_hh(c, d, a, b, x[i+15], 16,  530742520);
-    b = md5_hh(b, c, d, a, x[i+ 2], 23, -995338651);
-
-    a = md5_ii(a, b, c, d, x[i+ 0], 6 , -198630844);
-    d = md5_ii(d, a, b, c, x[i+ 7], 10,  1126891415);
-    c = md5_ii(c, d, a, b, x[i+14], 15, -1416354905);
-    b = md5_ii(b, c, d, a, x[i+ 5], 21, -57434055);
-    a = md5_ii(a, b, c, d, x[i+12], 6 ,  1700485571);
-    d = md5_ii(d, a, b, c, x[i+ 3], 10, -1894986606);
-    c = md5_ii(c, d, a, b, x[i+10], 15, -1051523);
-    b = md5_ii(b, c, d, a, x[i+ 1], 21, -2054922799);
-    a = md5_ii(a, b, c, d, x[i+ 8], 6 ,  1873313359);
-    d = md5_ii(d, a, b, c, x[i+15], 10, -30611744);
-    c = md5_ii(c, d, a, b, x[i+ 6], 15, -1560198380);
-    b = md5_ii(b, c, d, a, x[i+13], 21,  1309151649);
-    a = md5_ii(a, b, c, d, x[i+ 4], 6 , -145523070);
-    d = md5_ii(d, a, b, c, x[i+11], 10, -1120210379);
-    c = md5_ii(c, d, a, b, x[i+ 2], 15,  718787259);
-    b = md5_ii(b, c, d, a, x[i+ 9], 21, -343485551);
-
-    a = safe_add(a, olda);
-    b = safe_add(b, oldb);
-    c = safe_add(c, oldc);
-    d = safe_add(d, oldd);
-  }
-  return Array(a, b, c, d);
-
-}
-
-/*
- * These functions implement the four basic operations the algorithm uses.
- */
-function md5_cmn(q, a, b, x, s, t)
-{
-  return safe_add(bit_rol(safe_add(safe_add(a, q), safe_add(x, t)), s),b);
-}
-function md5_ff(a, b, c, d, x, s, t)
-{
-  return md5_cmn((b & c) | ((~b) & d), a, b, x, s, t);
-}
-function md5_gg(a, b, c, d, x, s, t)
-{
-  return md5_cmn((b & d) | (c & (~d)), a, b, x, s, t);
-}
-function md5_hh(a, b, c, d, x, s, t)
-{
-  return md5_cmn(b ^ c ^ d, a, b, x, s, t);
-}
-function md5_ii(a, b, c, d, x, s, t)
-{
-  return md5_cmn(c ^ (b | (~d)), a, b, x, s, t);
-}
-
-/*
- * Add integers, wrapping at 2^32. This uses 16-bit operations internally
- * to work around bugs in some JS interpreters.
- */
-function safe_add(x, y)
-{
-  var lsw = (x & 0xFFFF) + (y & 0xFFFF);
-  var msw = (x >> 16) + (y >> 16) + (lsw >> 16);
-  return (msw << 16) | (lsw & 0xFFFF);
-}
-
-/*
- * Bitwise rotate a 32-bit number to the left.
- */
-function bit_rol(num, cnt)
-{
-  return (num << cnt) | (num >>> (32 - cnt));
-}
-
-module.exports = function md5(buf) {
-  return helpers.hash(buf, core_md5, 16);
-};
-
-},{"./helpers":5}],8:[function(require,module,exports){
-// Original code adapted from Robert Kieffer.
-// details at https://github.com/broofa/node-uuid
-(function() {
-  var _global = this;
-
-  var mathRNG, whatwgRNG;
-
-  // NOTE: Math.random() does not guarantee "cryptographic quality"
-  mathRNG = function(size) {
-    var bytes = new Array(size);
-    var r;
-
-    for (var i = 0, r; i < size; i++) {
-      if ((i & 0x03) == 0) r = Math.random() * 0x100000000;
-      bytes[i] = r >>> ((i & 0x03) << 3) & 0xff;
-    }
-
-    return bytes;
-  }
-
-  if (_global.crypto && crypto.getRandomValues) {
-    whatwgRNG = function(size) {
-      var bytes = new Uint8Array(size);
-      crypto.getRandomValues(bytes);
-      return bytes;
-    }
-  }
-
-  module.exports = whatwgRNG || mathRNG;
-
-}())
-
-},{}],9:[function(require,module,exports){
-/*
- * A JavaScript implementation of the Secure Hash Algorithm, SHA-1, as defined
- * in FIPS PUB 180-1
- * Version 2.1a Copyright Paul Johnston 2000 - 2002.
- * Other contributors: Greg Holt, Andrew Kepert, Ydnar, Lostinet
- * Distributed under the BSD License
- * See http://pajhome.org.uk/crypt/md5 for details.
- */
-
-var helpers = require('./helpers');
-
-/*
- * Calculate the SHA-1 of an array of big-endian words, and a bit length
- */
-function core_sha1(x, len)
-{
-  /* append padding */
-  x[len >> 5] |= 0x80 << (24 - len % 32);
-  x[((len + 64 >> 9) << 4) + 15] = len;
-
-  var w = Array(80);
-  var a =  1732584193;
-  var b = -271733879;
-  var c = -1732584194;
-  var d =  271733878;
-  var e = -1009589776;
-
-  for(var i = 0; i < x.length; i += 16)
-  {
-    var olda = a;
-    var oldb = b;
-    var oldc = c;
-    var oldd = d;
-    var olde = e;
-
-    for(var j = 0; j < 80; j++)
-    {
-      if(j < 16) w[j] = x[i + j];
-      else w[j] = rol(w[j-3] ^ w[j-8] ^ w[j-14] ^ w[j-16], 1);
-      var t = safe_add(safe_add(rol(a, 5), sha1_ft(j, b, c, d)),
-                       safe_add(safe_add(e, w[j]), sha1_kt(j)));
-      e = d;
-      d = c;
-      c = rol(b, 30);
-      b = a;
-      a = t;
-    }
-
-    a = safe_add(a, olda);
-    b = safe_add(b, oldb);
-    c = safe_add(c, oldc);
-    d = safe_add(d, oldd);
-    e = safe_add(e, olde);
-  }
-  return Array(a, b, c, d, e);
-
-}
-
-/*
- * Perform the appropriate triplet combination function for the current
- * iteration
- */
-function sha1_ft(t, b, c, d)
-{
-  if(t < 20) return (b & c) | ((~b) & d);
-  if(t < 40) return b ^ c ^ d;
-  if(t < 60) return (b & c) | (b & d) | (c & d);
-  return b ^ c ^ d;
-}
-
-/*
- * Determine the appropriate additive constant for the current iteration
- */
-function sha1_kt(t)
-{
-  return (t < 20) ?  1518500249 : (t < 40) ?  1859775393 :
-         (t < 60) ? -1894007588 : -899497514;
-}
-
-/*
- * Add integers, wrapping at 2^32. This uses 16-bit operations internally
- * to work around bugs in some JS interpreters.
- */
-function safe_add(x, y)
-{
-  var lsw = (x & 0xFFFF) + (y & 0xFFFF);
-  var msw = (x >> 16) + (y >> 16) + (lsw >> 16);
-  return (msw << 16) | (lsw & 0xFFFF);
-}
-
-/*
- * Bitwise rotate a 32-bit number to the left.
- */
-function rol(num, cnt)
-{
-  return (num << cnt) | (num >>> (32 - cnt));
-}
-
-module.exports = function sha1(buf) {
-  return helpers.hash(buf, core_sha1, 20, true);
-};
-
-},{"./helpers":5}],10:[function(require,module,exports){
-
-/**
- * A JavaScript implementation of the Secure Hash Algorithm, SHA-256, as defined
- * in FIPS 180-2
- * Version 2.2-beta Copyright Angel Marin, Paul Johnston 2000 - 2009.
- * Other contributors: Greg Holt, Andrew Kepert, Ydnar, Lostinet
- *
- */
-
-var helpers = require('./helpers');
-
-var safe_add = function(x, y) {
-  var lsw = (x & 0xFFFF) + (y & 0xFFFF);
-  var msw = (x >> 16) + (y >> 16) + (lsw >> 16);
-  return (msw << 16) | (lsw & 0xFFFF);
-};
-
-var S = function(X, n) {
-  return (X >>> n) | (X << (32 - n));
-};
-
-var R = function(X, n) {
-  return (X >>> n);
-};
-
-var Ch = function(x, y, z) {
-  return ((x & y) ^ ((~x) & z));
-};
-
-var Maj = function(x, y, z) {
-  return ((x & y) ^ (x & z) ^ (y & z));
-};
-
-var Sigma0256 = function(x) {
-  return (S(x, 2) ^ S(x, 13) ^ S(x, 22));
-};
-
-var Sigma1256 = function(x) {
-  return (S(x, 6) ^ S(x, 11) ^ S(x, 25));
-};
-
-var Gamma0256 = function(x) {
-  return (S(x, 7) ^ S(x, 18) ^ R(x, 3));
-};
-
-var Gamma1256 = function(x) {
-  return (S(x, 17) ^ S(x, 19) ^ R(x, 10));
-};
-
-var core_sha256 = function(m, l) {
-  var K = new Array(0x428A2F98,0x71374491,0xB5C0FBCF,0xE9B5DBA5,0x3956C25B,0x59F111F1,0x923F82A4,0xAB1C5ED5,0xD807AA98,0x12835B01,0x243185BE,0x550C7DC3,0x72BE5D74,0x80DEB1FE,0x9BDC06A7,0xC19BF174,0xE49B69C1,0xEFBE4786,0xFC19DC6,0x240CA1CC,0x2DE92C6F,0x4A7484AA,0x5CB0A9DC,0x76F988DA,0x983E5152,0xA831C66D,0xB00327C8,0xBF597FC7,0xC6E00BF3,0xD5A79147,0x6CA6351,0x14292967,0x27B70A85,0x2E1B2138,0x4D2C6DFC,0x53380D13,0x650A7354,0x766A0ABB,0x81C2C92E,0x92722C85,0xA2BFE8A1,0xA81A664B,0xC24B8B70,0xC76C51A3,0xD192E819,0xD6990624,0xF40E3585,0x106AA070,0x19A4C116,0x1E376C08,0x2748774C,0x34B0BCB5,0x391C0CB3,0x4ED8AA4A,0x5B9CCA4F,0x682E6FF3,0x748F82EE,0x78A5636F,0x84C87814,0x8CC70208,0x90BEFFFA,0xA4506CEB,0xBEF9A3F7,0xC67178F2);
-  var HASH = new Array(0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19);
-    var W = new Array(64);
-    var a, b, c, d, e, f, g, h, i, j;
-    var T1, T2;
-  /* append padding */
-  m[l >> 5] |= 0x80 << (24 - l % 32);
-  m[((l + 64 >> 9) << 4) + 15] = l;
-  for (var i = 0; i < m.length; i += 16) {
-    a = HASH[0]; b = HASH[1]; c = HASH[2]; d = HASH[3]; e = HASH[4]; f = HASH[5]; g = HASH[6]; h = HASH[7];
-    for (var j = 0; j < 64; j++) {
-      if (j < 16) {
-        W[j] = m[j + i];
-      } else {
-        W[j] = safe_add(safe_add(safe_add(Gamma1256(W[j - 2]), W[j - 7]), Gamma0256(W[j - 15])), W[j - 16]);
-      }
-      T1 = safe_add(safe_add(safe_add(safe_add(h, Sigma1256(e)), Ch(e, f, g)), K[j]), W[j]);
-      T2 = safe_add(Sigma0256(a), Maj(a, b, c));
-      h = g; g = f; f = e; e = safe_add(d, T1); d = c; c = b; b = a; a = safe_add(T1, T2);
-    }
-    HASH[0] = safe_add(a, HASH[0]); HASH[1] = safe_add(b, HASH[1]); HASH[2] = safe_add(c, HASH[2]); HASH[3] = safe_add(d, HASH[3]);
-    HASH[4] = safe_add(e, HASH[4]); HASH[5] = safe_add(f, HASH[5]); HASH[6] = safe_add(g, HASH[6]); HASH[7] = safe_add(h, HASH[7]);
-  }
-  return HASH;
-};
-
-module.exports = function sha256(buf) {
-  return helpers.hash(buf, core_sha256, 32, true);
-};
-
-},{"./helpers":5}],11:[function(require,module,exports){
+(function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -1907,10 +58,8 @@ EventEmitter.prototype.emit = function(type) {
       er = arguments[1];
       if (er instanceof Error) {
         throw er; // Unhandled 'error' event
-      } else {
-        throw TypeError('Uncaught, unspecified "error" event.');
       }
-      return false;
+      throw TypeError('Uncaught, unspecified "error" event.');
     }
   }
 
@@ -1995,7 +144,10 @@ EventEmitter.prototype.addListener = function(type, listener) {
                     'leak detected. %d listeners added. ' +
                     'Use emitter.setMaxListeners() to increase limit.',
                     this._events[type].length);
-      console.trace();
+      if (typeof console.trace === 'function') {
+        // not supported in IE 10
+        console.trace();
+      }
     }
   }
 
@@ -2149,69 +301,7 @@ function isUndefined(arg) {
   return arg === void 0;
 }
 
-},{}],12:[function(require,module,exports){
-// shim for using process in browser
-
-var process = module.exports = {};
-
-process.nextTick = (function () {
-    var canSetImmediate = typeof window !== 'undefined'
-    && window.setImmediate;
-    var canPost = typeof window !== 'undefined'
-    && window.postMessage && window.addEventListener
-    ;
-
-    if (canSetImmediate) {
-        return function (f) { return window.setImmediate(f) };
-    }
-
-    if (canPost) {
-        var queue = [];
-        window.addEventListener('message', function (ev) {
-            var source = ev.source;
-            if ((source === window || source === null) && ev.data === 'process-tick') {
-                ev.stopPropagation();
-                if (queue.length > 0) {
-                    var fn = queue.shift();
-                    fn();
-                }
-            }
-        }, true);
-
-        return function nextTick(fn) {
-            queue.push(fn);
-            window.postMessage('process-tick', '*');
-        };
-    }
-
-    return function nextTick(fn) {
-        setTimeout(fn, 0);
-    };
-})();
-
-process.title = 'browser';
-process.browser = true;
-process.env = {};
-process.argv = [];
-
-function noop() {}
-
-process.on = noop;
-process.once = noop;
-process.off = noop;
-process.emit = noop;
-
-process.binding = function (name) {
-    throw new Error('process.binding is not supported');
-}
-
-// TODO(shtylman)
-process.cwd = function () { return '/' };
-process.chdir = function (dir) {
-    throw new Error('process.chdir is not supported');
-};
-
-},{}],13:[function(require,module,exports){
+},{}],2:[function(require,module,exports){
 (function (process){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -2438,8 +528,96 @@ var substr = 'ab'.substr(-1) === 'b'
     }
 ;
 
-}).call(this,require("/Users/enjamini/code/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js"))
-},{"/Users/enjamini/code/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js":12}],14:[function(require,module,exports){
+}).call(this,require('_process'))
+},{"_process":3}],3:[function(require,module,exports){
+// shim for using process in browser
+
+var process = module.exports = {};
+
+process.nextTick = (function () {
+    var canSetImmediate = typeof window !== 'undefined'
+    && window.setImmediate;
+    var canMutationObserver = typeof window !== 'undefined'
+    && window.MutationObserver;
+    var canPost = typeof window !== 'undefined'
+    && window.postMessage && window.addEventListener
+    ;
+
+    if (canSetImmediate) {
+        return function (f) { return window.setImmediate(f) };
+    }
+
+    var queue = [];
+
+    if (canMutationObserver) {
+        var hiddenDiv = document.createElement("div");
+        var observer = new MutationObserver(function () {
+            var queueList = queue.slice();
+            queue.length = 0;
+            queueList.forEach(function (fn) {
+                fn();
+            });
+        });
+
+        observer.observe(hiddenDiv, { attributes: true });
+
+        return function nextTick(fn) {
+            if (!queue.length) {
+                hiddenDiv.setAttribute('yes', 'no');
+            }
+            queue.push(fn);
+        };
+    }
+
+    if (canPost) {
+        window.addEventListener('message', function (ev) {
+            var source = ev.source;
+            if ((source === window || source === null) && ev.data === 'process-tick') {
+                ev.stopPropagation();
+                if (queue.length > 0) {
+                    var fn = queue.shift();
+                    fn();
+                }
+            }
+        }, true);
+
+        return function nextTick(fn) {
+            queue.push(fn);
+            window.postMessage('process-tick', '*');
+        };
+    }
+
+    return function nextTick(fn) {
+        setTimeout(fn, 0);
+    };
+})();
+
+process.title = 'browser';
+process.browser = true;
+process.env = {};
+process.argv = [];
+
+function noop() {}
+
+process.on = noop;
+process.addListener = noop;
+process.once = noop;
+process.off = noop;
+process.removeListener = noop;
+process.removeAllListeners = noop;
+process.emit = noop;
+
+process.binding = function (name) {
+    throw new Error('process.binding is not supported');
+};
+
+// TODO(shtylman)
+process.cwd = function () { return '/' };
+process.chdir = function (dir) {
+    throw new Error('process.chdir is not supported');
+};
+
+},{}],4:[function(require,module,exports){
 (function (global){
 /*! http://mths.be/punycode v1.2.4 by @mathias */
 ;(function(root) {
@@ -2949,8 +1127,8 @@ var substr = 'ab'.substr(-1) === 'b'
 
 }(this));
 
-}).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],15:[function(require,module,exports){
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{}],5:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -3036,7 +1214,7 @@ var isArray = Array.isArray || function (xs) {
   return Object.prototype.toString.call(xs) === '[object Array]';
 };
 
-},{}],16:[function(require,module,exports){
+},{}],6:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -3087,7 +1265,7 @@ module.exports = function(obj, sep, eq, name) {
     return map(objectKeys(obj), function(k) {
       var ks = encodeURIComponent(stringifyPrimitive(k)) + eq;
       if (isArray(obj[k])) {
-        return obj[k].map(function(v) {
+        return map(obj[k], function(v) {
           return ks + encodeURIComponent(stringifyPrimitive(v));
         }).join(sep);
       } else {
@@ -3123,17 +1301,13 @@ var objectKeys = Object.keys || function (obj) {
   return res;
 };
 
-},{}],17:[function(require,module,exports){
+},{}],7:[function(require,module,exports){
 'use strict';
 
 exports.decode = exports.parse = require('./decode');
 exports.encode = exports.stringify = require('./encode');
 
-},{"./decode":15,"./encode":16}],18:[function(require,module,exports){
-/*jshint strict:true node:true es5:true onevar:true laxcomma:true laxbreak:true eqeqeq:true immed:true latedef:true*/
-(function () {
-  "use strict";
-
+},{"./decode":5,"./encode":6}],8:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -3162,6 +1336,23 @@ exports.resolve = urlResolve;
 exports.resolveObject = urlResolveObject;
 exports.format = urlFormat;
 
+exports.Url = Url;
+
+function Url() {
+  this.protocol = null;
+  this.slashes = null;
+  this.auth = null;
+  this.host = null;
+  this.port = null;
+  this.hostname = null;
+  this.hash = null;
+  this.search = null;
+  this.query = null;
+  this.pathname = null;
+  this.path = null;
+  this.href = null;
+}
+
 // Reference: RFC 3986, RFC 1808, RFC 2396
 
 // define these here so at least they only have to be
@@ -3174,20 +1365,19 @@ var protocolPattern = /^([a-z0-9.+-]+:)/i,
     delims = ['<', '>', '"', '`', ' ', '\r', '\n', '\t'],
 
     // RFC 2396: characters not allowed for various reasons.
-    unwise = ['{', '}', '|', '\\', '^', '~', '`'].concat(delims),
+    unwise = ['{', '}', '|', '\\', '^', '`'].concat(delims),
 
     // Allowed by RFCs, but cause of XSS attacks.  Always escape these.
-    autoEscape = ['\''].concat(delims),
+    autoEscape = ['\''].concat(unwise),
     // Characters that are never ever allowed in a hostname.
     // Note that any invalid chars are also handled, but these
     // are the ones that are *expected* to be seen, so we fast-path
     // them.
-    nonHostChars = ['%', '/', '?', ';', '#']
-      .concat(unwise).concat(autoEscape),
-    nonAuthChars = ['/', '@', '?', '#'].concat(delims),
+    nonHostChars = ['%', '/', '?', ';', '#'].concat(autoEscape),
+    hostEndingChars = ['/', '?', '#'],
     hostnameMaxLen = 255,
-    hostnamePartPattern = /^[a-zA-Z0-9][a-z0-9A-Z_-]{0,62}$/,
-    hostnamePartStart = /^([a-zA-Z0-9][a-z0-9A-Z_-]{0,62})(.*)$/,
+    hostnamePartPattern = /^[a-z0-9A-Z_-]{0,63}$/,
+    hostnamePartStart = /^([a-z0-9A-Z_-]{0,63})(.*)$/,
     // protocols that can allow "unsafe" and "unwise" chars.
     unsafeProtocol = {
       'javascript': true,
@@ -3197,18 +1387,6 @@ var protocolPattern = /^([a-z0-9.+-]+:)/i,
     hostlessProtocol = {
       'javascript': true,
       'javascript:': true
-    },
-    // protocols that always have a path component.
-    pathedProtocol = {
-      'http': true,
-      'https': true,
-      'ftp': true,
-      'gopher': true,
-      'file': true,
-      'http:': true,
-      'ftp:': true,
-      'gopher:': true,
-      'file:': true
     },
     // protocols that always contain a // bit.
     slashedProtocol = {
@@ -3226,14 +1404,19 @@ var protocolPattern = /^([a-z0-9.+-]+:)/i,
     querystring = require('querystring');
 
 function urlParse(url, parseQueryString, slashesDenoteHost) {
-  if (url && typeof(url) === 'object' && url.href) return url;
+  if (url && isObject(url) && url instanceof Url) return url;
 
-  if (typeof url !== 'string') {
+  var u = new Url;
+  u.parse(url, parseQueryString, slashesDenoteHost);
+  return u;
+}
+
+Url.prototype.parse = function(url, parseQueryString, slashesDenoteHost) {
+  if (!isString(url)) {
     throw new TypeError("Parameter 'url' must be a string, not " + typeof url);
   }
 
-  var out = {},
-      rest = url;
+  var rest = url;
 
   // trim before proceeding.
   // This is to support parse stuff like "  http://foo.com  \n"
@@ -3243,7 +1426,7 @@ function urlParse(url, parseQueryString, slashesDenoteHost) {
   if (proto) {
     proto = proto[0];
     var lowerProto = proto.toLowerCase();
-    out.protocol = lowerProto;
+    this.protocol = lowerProto;
     rest = rest.substr(proto.length);
   }
 
@@ -3255,78 +1438,85 @@ function urlParse(url, parseQueryString, slashesDenoteHost) {
     var slashes = rest.substr(0, 2) === '//';
     if (slashes && !(proto && hostlessProtocol[proto])) {
       rest = rest.substr(2);
-      out.slashes = true;
+      this.slashes = true;
     }
   }
 
   if (!hostlessProtocol[proto] &&
       (slashes || (proto && !slashedProtocol[proto]))) {
+
     // there's a hostname.
     // the first instance of /, ?, ;, or # ends the host.
-    // don't enforce full RFC correctness, just be unstupid about it.
-
+    //
     // If there is an @ in the hostname, then non-host chars *are* allowed
-    // to the left of the first @ sign, unless some non-auth character
+    // to the left of the last @ sign, unless some host-ending character
     // comes *before* the @-sign.
     // URLs are obnoxious.
-    var atSign = rest.indexOf('@');
-    if (atSign !== -1) {
-      var auth = rest.slice(0, atSign);
+    //
+    // ex:
+    // http://a@b@c/ => user:a@b host:c
+    // http://a@b?@c => user:a host:c path:/?@c
 
-      // there *may be* an auth
-      var hasAuth = true;
-      for (var i = 0, l = nonAuthChars.length; i < l; i++) {
-        if (auth.indexOf(nonAuthChars[i]) !== -1) {
-          // not a valid auth.  Something like http://foo.com/bar@baz/
-          hasAuth = false;
-          break;
-        }
-      }
+    // v0.12 TODO(isaacs): This is not quite how Chrome does things.
+    // Review our test case against browsers more comprehensively.
 
-      if (hasAuth) {
-        // pluck off the auth portion.
-        out.auth = decodeURIComponent(auth);
-        rest = rest.substr(atSign + 1);
-      }
+    // find the first instance of any hostEndingChars
+    var hostEnd = -1;
+    for (var i = 0; i < hostEndingChars.length; i++) {
+      var hec = rest.indexOf(hostEndingChars[i]);
+      if (hec !== -1 && (hostEnd === -1 || hec < hostEnd))
+        hostEnd = hec;
     }
 
-    var firstNonHost = -1;
-    for (var i = 0, l = nonHostChars.length; i < l; i++) {
-      var index = rest.indexOf(nonHostChars[i]);
-      if (index !== -1 &&
-          (firstNonHost < 0 || index < firstNonHost)) firstNonHost = index;
-    }
-
-    if (firstNonHost !== -1) {
-      out.host = rest.substr(0, firstNonHost);
-      rest = rest.substr(firstNonHost);
+    // at this point, either we have an explicit point where the
+    // auth portion cannot go past, or the last @ char is the decider.
+    var auth, atSign;
+    if (hostEnd === -1) {
+      // atSign can be anywhere.
+      atSign = rest.lastIndexOf('@');
     } else {
-      out.host = rest;
-      rest = '';
+      // atSign must be in auth portion.
+      // http://a@b/c@d => host:b auth:a path:/c@d
+      atSign = rest.lastIndexOf('@', hostEnd);
     }
+
+    // Now we have a portion which is definitely the auth.
+    // Pull that off.
+    if (atSign !== -1) {
+      auth = rest.slice(0, atSign);
+      rest = rest.slice(atSign + 1);
+      this.auth = decodeURIComponent(auth);
+    }
+
+    // the host is the remaining to the left of the first non-host char
+    hostEnd = -1;
+    for (var i = 0; i < nonHostChars.length; i++) {
+      var hec = rest.indexOf(nonHostChars[i]);
+      if (hec !== -1 && (hostEnd === -1 || hec < hostEnd))
+        hostEnd = hec;
+    }
+    // if we still have not hit it, then the entire thing is a host.
+    if (hostEnd === -1)
+      hostEnd = rest.length;
+
+    this.host = rest.slice(0, hostEnd);
+    rest = rest.slice(hostEnd);
 
     // pull out port.
-    var p = parseHost(out.host);
-    var keys = Object.keys(p);
-    for (var i = 0, l = keys.length; i < l; i++) {
-      var key = keys[i];
-      out[key] = p[key];
-    }
+    this.parseHost();
 
     // we've indicated that there is a hostname,
     // so even if it's empty, it has to be present.
-    out.hostname = out.hostname || '';
+    this.hostname = this.hostname || '';
 
     // if hostname begins with [ and ends with ]
     // assume that it's an IPv6 address.
-    var ipv6Hostname = out.hostname[0] === '[' &&
-        out.hostname[out.hostname.length - 1] === ']';
+    var ipv6Hostname = this.hostname[0] === '[' &&
+        this.hostname[this.hostname.length - 1] === ']';
 
     // validate a little.
-    if (out.hostname.length > hostnameMaxLen) {
-      out.hostname = '';
-    } else if (!ipv6Hostname) {
-      var hostparts = out.hostname.split(/\./);
+    if (!ipv6Hostname) {
+      var hostparts = this.hostname.split(/\./);
       for (var i = 0, l = hostparts.length; i < l; i++) {
         var part = hostparts[i];
         if (!part) continue;
@@ -3354,38 +1544,44 @@ function urlParse(url, parseQueryString, slashesDenoteHost) {
             if (notHost.length) {
               rest = '/' + notHost.join('.') + rest;
             }
-            out.hostname = validParts.join('.');
+            this.hostname = validParts.join('.');
             break;
           }
         }
       }
     }
 
-    // hostnames are always lower case.
-    out.hostname = out.hostname.toLowerCase();
+    if (this.hostname.length > hostnameMaxLen) {
+      this.hostname = '';
+    } else {
+      // hostnames are always lower case.
+      this.hostname = this.hostname.toLowerCase();
+    }
 
     if (!ipv6Hostname) {
       // IDNA Support: Returns a puny coded representation of "domain".
       // It only converts the part of the domain name that
       // has non ASCII characters. I.e. it dosent matter if
       // you call it with a domain that already is in ASCII.
-      var domainArray = out.hostname.split('.');
+      var domainArray = this.hostname.split('.');
       var newOut = [];
       for (var i = 0; i < domainArray.length; ++i) {
         var s = domainArray[i];
         newOut.push(s.match(/[^A-Za-z0-9_-]/) ?
             'xn--' + punycode.encode(s) : s);
       }
-      out.hostname = newOut.join('.');
+      this.hostname = newOut.join('.');
     }
 
-    out.host = (out.hostname || '') +
-        ((out.port) ? ':' + out.port : '');
-    out.href += out.host;
+    var p = this.port ? ':' + this.port : '';
+    var h = this.hostname || '';
+    this.host = h + p;
+    this.href += this.host;
 
     // strip [ and ] from the hostname
+    // the host field still retains them, though
     if (ipv6Hostname) {
-      out.hostname = out.hostname.substr(1, out.hostname.length - 2);
+      this.hostname = this.hostname.substr(1, this.hostname.length - 2);
       if (rest[0] !== '/') {
         rest = '/' + rest;
       }
@@ -3414,38 +1610,39 @@ function urlParse(url, parseQueryString, slashesDenoteHost) {
   var hash = rest.indexOf('#');
   if (hash !== -1) {
     // got a fragment string.
-    out.hash = rest.substr(hash);
+    this.hash = rest.substr(hash);
     rest = rest.slice(0, hash);
   }
   var qm = rest.indexOf('?');
   if (qm !== -1) {
-    out.search = rest.substr(qm);
-    out.query = rest.substr(qm + 1);
+    this.search = rest.substr(qm);
+    this.query = rest.substr(qm + 1);
     if (parseQueryString) {
-      out.query = querystring.parse(out.query);
+      this.query = querystring.parse(this.query);
     }
     rest = rest.slice(0, qm);
   } else if (parseQueryString) {
     // no query string, but parseQueryString still requested
-    out.search = '';
-    out.query = {};
+    this.search = '';
+    this.query = {};
   }
-  if (rest) out.pathname = rest;
-  if (slashedProtocol[proto] &&
-      out.hostname && !out.pathname) {
-    out.pathname = '/';
+  if (rest) this.pathname = rest;
+  if (slashedProtocol[lowerProto] &&
+      this.hostname && !this.pathname) {
+    this.pathname = '/';
   }
 
   //to support http.request
-  if (out.pathname || out.search) {
-    out.path = (out.pathname ? out.pathname : '') +
-               (out.search ? out.search : '');
+  if (this.pathname || this.search) {
+    var p = this.pathname || '';
+    var s = this.search || '';
+    this.path = p + s;
   }
 
   // finally, reconstruct the href based on what has been validated.
-  out.href = urlFormat(out);
-  return out;
-}
+  this.href = this.format();
+  return this;
+};
 
 // format a parsed object into a url string
 function urlFormat(obj) {
@@ -3453,44 +1650,49 @@ function urlFormat(obj) {
   // If it's an obj, this is a no-op.
   // this way, you can call url_format() on strings
   // to clean up potentially wonky urls.
-  if (typeof(obj) === 'string') obj = urlParse(obj);
+  if (isString(obj)) obj = urlParse(obj);
+  if (!(obj instanceof Url)) return Url.prototype.format.call(obj);
+  return obj.format();
+}
 
-  var auth = obj.auth || '';
+Url.prototype.format = function() {
+  var auth = this.auth || '';
   if (auth) {
     auth = encodeURIComponent(auth);
     auth = auth.replace(/%3A/i, ':');
     auth += '@';
   }
 
-  var protocol = obj.protocol || '',
-      pathname = obj.pathname || '',
-      hash = obj.hash || '',
+  var protocol = this.protocol || '',
+      pathname = this.pathname || '',
+      hash = this.hash || '',
       host = false,
       query = '';
 
-  if (obj.host !== undefined) {
-    host = auth + obj.host;
-  } else if (obj.hostname !== undefined) {
-    host = auth + (obj.hostname.indexOf(':') === -1 ?
-        obj.hostname :
-        '[' + obj.hostname + ']');
-    if (obj.port) {
-      host += ':' + obj.port;
+  if (this.host) {
+    host = auth + this.host;
+  } else if (this.hostname) {
+    host = auth + (this.hostname.indexOf(':') === -1 ?
+        this.hostname :
+        '[' + this.hostname + ']');
+    if (this.port) {
+      host += ':' + this.port;
     }
   }
 
-  if (obj.query && typeof obj.query === 'object' &&
-      Object.keys(obj.query).length) {
-    query = querystring.stringify(obj.query);
+  if (this.query &&
+      isObject(this.query) &&
+      Object.keys(this.query).length) {
+    query = querystring.stringify(this.query);
   }
 
-  var search = obj.search || (query && ('?' + query)) || '';
+  var search = this.search || (query && ('?' + query)) || '';
 
   if (protocol && protocol.substr(-1) !== ':') protocol += ':';
 
   // only the slashedProtocols get the //.  Not mailto:, xmpp:, etc.
   // unless they had them to begin with.
-  if (obj.slashes ||
+  if (this.slashes ||
       (!protocol || slashedProtocol[protocol]) && host !== false) {
     host = '//' + (host || '');
     if (pathname && pathname.charAt(0) !== '/') pathname = '/' + pathname;
@@ -3501,40 +1703,68 @@ function urlFormat(obj) {
   if (hash && hash.charAt(0) !== '#') hash = '#' + hash;
   if (search && search.charAt(0) !== '?') search = '?' + search;
 
+  pathname = pathname.replace(/[?#]/g, function(match) {
+    return encodeURIComponent(match);
+  });
+  search = search.replace('#', '%23');
+
   return protocol + host + pathname + search + hash;
-}
+};
 
 function urlResolve(source, relative) {
-  return urlFormat(urlResolveObject(source, relative));
+  return urlParse(source, false, true).resolve(relative);
 }
+
+Url.prototype.resolve = function(relative) {
+  return this.resolveObject(urlParse(relative, false, true)).format();
+};
 
 function urlResolveObject(source, relative) {
   if (!source) return relative;
+  return urlParse(source, false, true).resolveObject(relative);
+}
 
-  source = urlParse(urlFormat(source), false, true);
-  relative = urlParse(urlFormat(relative), false, true);
+Url.prototype.resolveObject = function(relative) {
+  if (isString(relative)) {
+    var rel = new Url();
+    rel.parse(relative, false, true);
+    relative = rel;
+  }
+
+  var result = new Url();
+  Object.keys(this).forEach(function(k) {
+    result[k] = this[k];
+  }, this);
 
   // hash is always overridden, no matter what.
-  source.hash = relative.hash;
+  // even href="" will remove it.
+  result.hash = relative.hash;
 
+  // if the relative url is empty, then there's nothing left to do here.
   if (relative.href === '') {
-    source.href = urlFormat(source);
-    return source;
+    result.href = result.format();
+    return result;
   }
 
   // hrefs like //foo/bar always cut to the protocol.
   if (relative.slashes && !relative.protocol) {
-    relative.protocol = source.protocol;
+    // take everything except the protocol from relative
+    Object.keys(relative).forEach(function(k) {
+      if (k !== 'protocol')
+        result[k] = relative[k];
+    });
+
     //urlParse appends trailing / to urls like http://www.example.com
-    if (slashedProtocol[relative.protocol] &&
-        relative.hostname && !relative.pathname) {
-      relative.path = relative.pathname = '/';
+    if (slashedProtocol[result.protocol] &&
+        result.hostname && !result.pathname) {
+      result.path = result.pathname = '/';
     }
-    relative.href = urlFormat(relative);
-    return relative;
+
+    result.href = result.format();
+    return result;
   }
 
-  if (relative.protocol && relative.protocol !== source.protocol) {
+  if (relative.protocol && relative.protocol !== result.protocol) {
     // if it's a known url protocol, then changing
     // the protocol does weird things
     // first, if it's not file:, then we MUST have a host,
@@ -3544,10 +1774,14 @@ function urlResolveObject(source, relative) {
     // because that's known to be hostless.
     // anything else is assumed to be absolute.
     if (!slashedProtocol[relative.protocol]) {
-      relative.href = urlFormat(relative);
-      return relative;
+      Object.keys(relative).forEach(function(k) {
+        result[k] = relative[k];
+      });
+      result.href = result.format();
+      return result;
     }
-    source.protocol = relative.protocol;
+
+    result.protocol = relative.protocol;
     if (!relative.host && !hostlessProtocol[relative.protocol]) {
       var relPath = (relative.pathname || '').split('/');
       while (relPath.length && !(relative.host = relPath.shift()));
@@ -3555,72 +1789,72 @@ function urlResolveObject(source, relative) {
       if (!relative.hostname) relative.hostname = '';
       if (relPath[0] !== '') relPath.unshift('');
       if (relPath.length < 2) relPath.unshift('');
-      relative.pathname = relPath.join('/');
+      result.pathname = relPath.join('/');
+    } else {
+      result.pathname = relative.pathname;
     }
-    source.pathname = relative.pathname;
-    source.search = relative.search;
-    source.query = relative.query;
-    source.host = relative.host || '';
-    source.auth = relative.auth;
-    source.hostname = relative.hostname || relative.host;
-    source.port = relative.port;
-    //to support http.request
-    if (source.pathname !== undefined || source.search !== undefined) {
-      source.path = (source.pathname ? source.pathname : '') +
-                    (source.search ? source.search : '');
+    result.search = relative.search;
+    result.query = relative.query;
+    result.host = relative.host || '';
+    result.auth = relative.auth;
+    result.hostname = relative.hostname || relative.host;
+    result.port = relative.port;
+    // to support http.request
+    if (result.pathname || result.search) {
+      var p = result.pathname || '';
+      var s = result.search || '';
+      result.path = p + s;
     }
-    source.slashes = source.slashes || relative.slashes;
-    source.href = urlFormat(source);
-    return source;
+    result.slashes = result.slashes || relative.slashes;
+    result.href = result.format();
+    return result;
   }
 
-  var isSourceAbs = (source.pathname && source.pathname.charAt(0) === '/'),
+  var isSourceAbs = (result.pathname && result.pathname.charAt(0) === '/'),
       isRelAbs = (
-          relative.host !== undefined ||
+          relative.host ||
           relative.pathname && relative.pathname.charAt(0) === '/'
       ),
       mustEndAbs = (isRelAbs || isSourceAbs ||
-                    (source.host && relative.pathname)),
+                    (result.host && relative.pathname)),
       removeAllDots = mustEndAbs,
-      srcPath = source.pathname && source.pathname.split('/') || [],
+      srcPath = result.pathname && result.pathname.split('/') || [],
       relPath = relative.pathname && relative.pathname.split('/') || [],
-      psychotic = source.protocol &&
-          !slashedProtocol[source.protocol];
+      psychotic = result.protocol && !slashedProtocol[result.protocol];
 
   // if the url is a non-slashed url, then relative
   // links like ../.. should be able
   // to crawl up to the hostname, as well.  This is strange.
-  // source.protocol has already been set by now.
+  // result.protocol has already been set by now.
   // Later on, put the first path part into the host field.
   if (psychotic) {
-
-    delete source.hostname;
-    delete source.port;
-    if (source.host) {
-      if (srcPath[0] === '') srcPath[0] = source.host;
-      else srcPath.unshift(source.host);
+    result.hostname = '';
+    result.port = null;
+    if (result.host) {
+      if (srcPath[0] === '') srcPath[0] = result.host;
+      else srcPath.unshift(result.host);
     }
-    delete source.host;
+    result.host = '';
     if (relative.protocol) {
-      delete relative.hostname;
-      delete relative.port;
+      relative.hostname = null;
+      relative.port = null;
       if (relative.host) {
         if (relPath[0] === '') relPath[0] = relative.host;
         else relPath.unshift(relative.host);
       }
-      delete relative.host;
+      relative.host = null;
     }
     mustEndAbs = mustEndAbs && (relPath[0] === '' || srcPath[0] === '');
   }
 
   if (isRelAbs) {
     // it's absolute.
-    source.host = (relative.host || relative.host === '') ?
-                      relative.host : source.host;
-    source.hostname = (relative.hostname || relative.hostname === '') ?
-                      relative.hostname : source.hostname;
-    source.search = relative.search;
-    source.query = relative.query;
+    result.host = (relative.host || relative.host === '') ?
+                  relative.host : result.host;
+    result.hostname = (relative.hostname || relative.hostname === '') ?
+                      relative.hostname : result.hostname;
+    result.search = relative.search;
+    result.query = relative.query;
     srcPath = relPath;
     // fall through to the dot-handling below.
   } else if (relPath.length) {
@@ -3629,53 +1863,55 @@ function urlResolveObject(source, relative) {
     if (!srcPath) srcPath = [];
     srcPath.pop();
     srcPath = srcPath.concat(relPath);
-    source.search = relative.search;
-    source.query = relative.query;
-  } else if ('search' in relative) {
+    result.search = relative.search;
+    result.query = relative.query;
+  } else if (!isNullOrUndefined(relative.search)) {
     // just pull out the search.
     // like href='?foo'.
     // Put this after the other two cases because it simplifies the booleans
     if (psychotic) {
-      source.hostname = source.host = srcPath.shift();
+      result.hostname = result.host = srcPath.shift();
       //occationaly the auth can get stuck only in host
       //this especialy happens in cases like
       //url.resolveObject('mailto:local1@domain1', 'local2@domain2')
-      var authInHost = source.host && source.host.indexOf('@') > 0 ?
-                       source.host.split('@') : false;
+      var authInHost = result.host && result.host.indexOf('@') > 0 ?
+                       result.host.split('@') : false;
       if (authInHost) {
-        source.auth = authInHost.shift();
-        source.host = source.hostname = authInHost.shift();
+        result.auth = authInHost.shift();
+        result.host = result.hostname = authInHost.shift();
       }
     }
-    source.search = relative.search;
-    source.query = relative.query;
+    result.search = relative.search;
+    result.query = relative.query;
     //to support http.request
-    if (source.pathname !== undefined || source.search !== undefined) {
-      source.path = (source.pathname ? source.pathname : '') +
-                    (source.search ? source.search : '');
+    if (!isNull(result.pathname) || !isNull(result.search)) {
+      result.path = (result.pathname ? result.pathname : '') +
+                    (result.search ? result.search : '');
     }
-    source.href = urlFormat(source);
-    return source;
+    result.href = result.format();
+    return result;
   }
+
   if (!srcPath.length) {
     // no path at all.  easy.
     // we've already handled the other stuff above.
-    delete source.pathname;
+    result.pathname = null;
     //to support http.request
-    if (!source.search) {
-      source.path = '/' + source.search;
+    if (result.search) {
+      result.path = '/' + result.search;
     } else {
-      delete source.path;
+      result.path = null;
     }
-    source.href = urlFormat(source);
-    return source;
+    result.href = result.format();
+    return result;
   }
+
   // if a url ENDs in . or .., then it must get a trailing slash.
   // however, if it ends in anything else non-slashy,
   // then it must NOT get a trailing slash.
   var last = srcPath.slice(-1)[0];
   var hasTrailingSlash = (
-      (source.host || relative.host) && (last === '.' || last === '..') ||
+      (result.host || relative.host) && (last === '.' || last === '..') ||
       last === '');
 
   // strip single dots, resolve double dots to parent dir
@@ -3715,55 +1951,72 @@ function urlResolveObject(source, relative) {
 
   // put the host back
   if (psychotic) {
-    source.hostname = source.host = isAbsolute ? '' :
+    result.hostname = result.host = isAbsolute ? '' :
                                     srcPath.length ? srcPath.shift() : '';
     //occationaly the auth can get stuck only in host
     //this especialy happens in cases like
     //url.resolveObject('mailto:local1@domain1', 'local2@domain2')
-    var authInHost = source.host && source.host.indexOf('@') > 0 ?
-                     source.host.split('@') : false;
+    var authInHost = result.host && result.host.indexOf('@') > 0 ?
+                     result.host.split('@') : false;
     if (authInHost) {
-      source.auth = authInHost.shift();
-      source.host = source.hostname = authInHost.shift();
+      result.auth = authInHost.shift();
+      result.host = result.hostname = authInHost.shift();
     }
   }
 
-  mustEndAbs = mustEndAbs || (source.host && srcPath.length);
+  mustEndAbs = mustEndAbs || (result.host && srcPath.length);
 
   if (mustEndAbs && !isAbsolute) {
     srcPath.unshift('');
   }
 
-  source.pathname = srcPath.join('/');
-  //to support request.http
-  if (source.pathname !== undefined || source.search !== undefined) {
-    source.path = (source.pathname ? source.pathname : '') +
-                  (source.search ? source.search : '');
+  if (!srcPath.length) {
+    result.pathname = null;
+    result.path = null;
+  } else {
+    result.pathname = srcPath.join('/');
   }
-  source.auth = relative.auth || source.auth;
-  source.slashes = source.slashes || relative.slashes;
-  source.href = urlFormat(source);
-  return source;
-}
 
-function parseHost(host) {
-  var out = {};
+  //to support request.http
+  if (!isNull(result.pathname) || !isNull(result.search)) {
+    result.path = (result.pathname ? result.pathname : '') +
+                  (result.search ? result.search : '');
+  }
+  result.auth = relative.auth || result.auth;
+  result.slashes = result.slashes || relative.slashes;
+  result.href = result.format();
+  return result;
+};
+
+Url.prototype.parseHost = function() {
+  var host = this.host;
   var port = portPattern.exec(host);
   if (port) {
     port = port[0];
     if (port !== ':') {
-      out.port = port.substr(1);
+      this.port = port.substr(1);
     }
     host = host.substr(0, host.length - port.length);
   }
-  if (host) out.hostname = host;
-  return out;
+  if (host) this.hostname = host;
+};
+
+function isString(arg) {
+  return typeof arg === "string";
 }
 
-}());
+function isObject(arg) {
+  return typeof arg === 'object' && arg !== null;
+}
 
-},{"punycode":14,"querystring":17}],19:[function(require,module,exports){
-(function (process,global,__dirname){
+function isNull(arg) {
+  return arg === null;
+}
+function isNullOrUndefined(arg) {
+  return  arg == null;
+}
+
+},{"punycode":4,"querystring":7}],9:[function(require,module,exports){
 /*
  * App.js
  *
@@ -3778,6 +2031,7 @@ var util = require('racer/lib/util');
 var derbyTemplates = require('derby-templates');
 var documentListeners = require('./documentListeners');
 var Page = require('./Page');
+var serializedViews = require('./_views');
 
 module.exports = App;
 
@@ -3786,6 +2040,8 @@ function App(derby, name, filename) {
   this.derby = derby;
   this.name = name;
   this.filename = filename;
+  this.scriptHash = '{{DERBY_SCRIPT_HASH}}';
+  this.bundledAt = '{{DERBY_BUNDLED_AT}}';
   this.Page = createAppPage();
   this.proto = this.Page.prototype;
   this.views = new derbyTemplates.templates.Views();
@@ -3809,62 +2065,172 @@ util.mergeInto(App.prototype, EventEmitter.prototype);
 
 // Overriden on server
 App.prototype._init = function() {
-  var serializedViews = require('./_views');
-  serializedViews(derbyTemplates, this.views);
-
+  this._waitForAttach = true;
+  this._cancelAttach = false;
   this.model = new this.derby.Model();
-
-  // Init async so that app.on('model') listeners can be added
-  var app = this;
-  process.nextTick(function() {
-    app.emit('model', app.model);
-
-    var script = app._getScript();
-    var data = JSON.parse(script.getAttribute('data-bundle'));
-    script.removeAttribute('data-bundle');
-    app.model.createConnection(data);
-    app.model.unbundle(data);
-    app._autoRefresh();
-    var page = app.createPage();
-    page.params = app.model.get('$render.params');
+  this.model.createConnection();
+  serializedViews(derbyTemplates, this.views);
+  // Must init async so that app.on('model') listeners can be added.
+  // Must also wait for content ready so that bundle is fully downloaded.
+  this._contentReady();
+};
+App.prototype._finishInit = function() {
+  this.emit('model', this.model);
+  var script = this._getScript();
+  var data;
+  try {
+    data = JSON.parse(script.nextSibling.innerHTML);
+  } catch (err) {
+    var json = script.nextSibling && script.nextSibling.innerHTML;
+    this.emit('error', err, json);
+  }
+  util.isProduction = data.nodeEnv === 'production';
+  if (!util.isProduction) this._autoRefresh();
+  this.model.unbundle(data);
+  var page = this.createPage();
+  page.params = this.model.get('$render.params');
+  this.emit('ready', page);
+  this._waitForAttach = false;
+  // Instead of attaching, do a route and render if a link was clicked before
+  // the page finished attaching
+  if (this._cancelAttach) {
+    this.history.refresh();
+    return;
+  }
+  try {
+    // Attach to the currently rendered DOM. This will fail if there is any
+    // slight mismatch between the rendered HTML and the client-side render
     page.attach();
-    app.emit('ready');
-  });
+  } catch (err) {
+    // Since an attachment failure is *fatal* and could happen as a result of a
+    // browser extension like AdBlock, an invalid template, or a small bug in
+    // Derby or Saddle, re-render from scratch on production failures
+    if (util.isProduction) this.history.refresh();
+    this.emit('error', err);
+  }
+};
+// Modified from: https://github.com/addyosmani/jquery.parts/blob/master/jquery.documentReady.js
+App.prototype._contentReady = function() {
+  // Is the DOM ready to be used? Set to true once it occurs.
+  var isReady = false;
+  var app = this;
+
+  // The ready event handler
+  function onDOMContentLoaded() {
+    if (document.addEventListener) {
+      document.removeEventListener('DOMContentLoaded', onDOMContentLoaded, false);
+    } else {
+      // we're here because readyState !== 'loading' in oldIE
+      // which is good enough for us to call the dom ready!
+      document.detachEvent('onreadystatechange', onDOMContentLoaded);
+    }
+    onDOMReady();
+  }
+
+  // Handle when the DOM is ready
+  function onDOMReady() {
+    // Make sure that the DOM is not already loaded
+    if (isReady) return;
+    // Make sure body exists, at least, in case IE gets a little overzealous (ticket #5443).
+    if (!document.body) return setTimeout(onDOMReady, 0);
+    // Remember that the DOM is ready
+    isReady = true;
+    // Make sure this is always async and then finishin init
+    setTimeout(function() {
+      app._finishInit();
+    }, 0);
+  }
+
+  // The DOM ready check for Internet Explorer
+  function doScrollCheck() {
+    if (isReady) return;
+    try {
+      // If IE is used, use the trick by Diego Perini
+      // http://javascript.nwbox.com/IEContentLoaded/
+      document.documentElement.doScroll('left');
+    } catch (err) {
+      setTimeout(doScrollCheck, 0);
+      return;
+    }
+    // and execute any waiting functions
+    onDOMReady();
+  }
+
+  // Catch cases where called after the browser event has already occurred.
+  if (document.readyState !== 'loading') return onDOMReady();
+
+  // Mozilla, Opera and webkit nightlies currently support this event
+  if (document.addEventListener) {
+    // Use the handy event callback
+    document.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
+    // A fallback to window.onload, that will always work
+    window.addEventListener('load', onDOMContentLoaded, false);
+    // If IE event model is used
+  } else if (document.attachEvent) {
+    // ensure firing before onload,
+    // maybe late but safe also for iframes
+    document.attachEvent('onreadystatechange', onDOMContentLoaded);
+    // A fallback to window.onload, that will always work
+    window.attachEvent('onload', onDOMContentLoaded);
+    // If IE and not a frame
+    // continually check to see if the document is ready
+    var toplevel;
+    try {
+      toplevel = window.frameElement == null;
+    } catch (err) {}
+    if (document.documentElement.doScroll && toplevel) {
+      doScrollCheck();
+    }
+  }
 };
 
 App.prototype._getScript = function() {
-  return document.querySelector('script[src="/derby/' + this.name + '"]');
+  return document.querySelector('script[src^="/derby/' + this.name + '"]');
 };
 
 App.prototype.use = util.use;
+App.prototype.serverUse = util.serverUse;
 
 App.prototype.loadViews = function() {};
 
 App.prototype.loadStyles = function() {};
 
 App.prototype.createPage = function() {
-  if (this.page) this.page.destroy();
+  if (this.page) {
+    this.emit('destroyPage', this.page);
+    this.page.destroy();
+  }
   var page = new this.Page(this, this.model);
   this.page = page;
   return page;
 };
 
-App.prototype.onRoute = function(callback, page, params, next, isTransitional, done) {
-  if (isTransitional) {
-    if (callback.length === 4) {
-      callback(page.model, params, next, done);
-      return true;
-    } else {
-      callback(page.model, params, next);
-      return;
-    }
+App.prototype.onRoute = function(callback, page, next, done) {
+  if (this._waitForAttach) {
+    // Cancel any routing before the initial page attachment. Instead, do a
+    // render once derby is ready
+    this._cancelAttach = true;
+    return;
   }
-  callback(page, page.model, params, next);
+  this.emit('route', page);
+  // HACK: To update render in transitional routes
+  page.model.set('$render.params', page.params);
+  page.model.set('$render.url', page.params.url);
+  page.model.set('$render.query', page.params.query);
+  // If transitional
+  if (done) {
+    var app = this;
+    var _done = function() {
+      app.emit('routeDone', page, 'transition');
+      done();
+    };
+    callback.call(page, page, page.model, page.params, next, _done);
+    return;
+  }
+  callback.call(page, page, page.model, page.params, next);
 };
 
 App.prototype._autoRefresh = function() {
-  if (util.isProduction) return;
-
   var app = this;
   this.model.on('change', '$connection.state', function(state) {
     if (state === 'connected') registerClient();
@@ -3876,7 +2242,7 @@ App.prototype._autoRefresh = function() {
     app.page.render(ns);
   });
   function registerClient() {
-    var data = {name: app.name, hash: global.DERBY_SCRIPT_HASH};
+    var data = {name: app.name, hash: app.scriptHash};
     app.model.channel.send('derby:app', data, function(err) {
       if (!err) return;
       // Reload in a timeout so that returning fetches have time to complete
@@ -3889,19 +2255,22 @@ App.prototype._autoRefresh = function() {
   registerClient();
 };
 
-util.serverRequire(__dirname + '/App.server');
+util.serverRequire(module, './App.server');
 
-}).call(this,require("/Users/enjamini/code/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js"),typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},"/node_modules/derby/lib")
-},{"./Page":23,"./_views":24,"./documentListeners":26,"/Users/enjamini/code/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js":12,"derby-templates":33,"events":11,"racer/lib/util":56,"tracks":61}],20:[function(require,module,exports){
+},{"./Page":13,"./_views":14,"./documentListeners":16,"derby-templates":23,"events":1,"racer/lib/util":46,"tracks":52}],10:[function(require,module,exports){
 var EventEmitter = require('events').EventEmitter;
 var util = require('racer/lib/util');
 var Dom = require('./Dom');
 
 module.exports = Controller;
 
-function Controller() {
+function Controller(app, page, model) {
   EventEmitter.call(this);
   this.dom = new Dom(this);
+  this.app = app;
+  this.page = page;
+  this.model = model;
+  model.data.$controller = this;
 }
 
 util.mergeInto(Controller.prototype, EventEmitter.prototype);
@@ -3936,7 +2305,7 @@ Controller.prototype.emitDelayable = function() {
   return delayed;
 };
 
-},{"./Dom":22,"events":11,"racer/lib/util":56}],21:[function(require,module,exports){
+},{"./Dom":12,"events":1,"racer/lib/util":46}],11:[function(require,module,exports){
 var EventEmitter = require('events').EventEmitter;
 var Model = require('racer/lib/Model/ModelStandalone');
 var util = require('racer/lib/util');
@@ -3971,7 +2340,7 @@ App.prototype._init = function() {
   this.createPage();
 };
 
-},{"./App":19,"./Page":23,"./components":25,"./documentListeners":26,"events":11,"racer/lib/Model/ModelStandalone":45,"racer/lib/util":56}],22:[function(require,module,exports){
+},{"./App":9,"./Page":13,"./components":15,"./documentListeners":16,"events":1,"racer/lib/Model/ModelStandalone":35,"racer/lib/util":46}],12:[function(require,module,exports){
 module.exports = Dom;
 
 function Dom(controller) {
@@ -4061,8 +2430,8 @@ DomListener.prototype.remove = function() {
   this.target.removeEventListener(this.type, this.listener, this.useCapture);
 };
 
-},{}],23:[function(require,module,exports){
-(function (global,__dirname){
+},{}],13:[function(require,module,exports){
+(function (global){
 var derbyTemplates = require('derby-templates');
 var contexts = derbyTemplates.contexts;
 var expressions = derbyTemplates.expressions;
@@ -4071,14 +2440,12 @@ var util = require('racer/lib/util');
 var EventModel = require('./eventmodel');
 var textDiff = require('./textDiff');
 var Controller = require('./Controller');
+var documentListeners = require('./documentListeners');
 
 module.exports = Page;
 
 function Page(app, model, req, res) {
-  Controller.call(this);
-  this.page = this;
-  this.app = app;
-  this.model = model;
+  Controller.call(this, app, this, model);
   this.req = req;
   this.res = res;
   this.params = null;
@@ -4092,7 +2459,7 @@ function Page(app, model, req, res) {
 
 // Inherit from the global object so that global functions and constructors are
 // available for use as template helpers.
-// 
+//
 // It's important that the page controller doesn't have a parent, since this
 // could cause an infinite loop in controller function lookup
 Page.prototype = Object.create(global, {parent: {value: null}});
@@ -4130,10 +2497,10 @@ Page.prototype._setRenderPrefix = function(ns) {
   this.model.set('$render.prefix', prefix);
 };
 
-Page.prototype.get = function(viewName, ns) {
+Page.prototype.get = function(viewName, ns, unescaped) {
   this._setRenderPrefix(ns);
   var view = this.getView(viewName, ns);
-  return view.get(this.context, view.string);
+  return view.get(this.context, unescaped);
 };
 
 Page.prototype.getFragment = function(viewName, ns) {
@@ -4147,25 +2514,26 @@ Page.prototype.getView = function(viewName, ns) {
 };
 
 Page.prototype.render = function(ns) {
+  this.app.emit('render', this);
   this.context.pause();
   this._setRenderParams(ns);
-  var fragment = this.getFragment('Page', ns);
-
-  // This hack prevents browsers from bleeding scroll state when replacing
-  // the entire document body. Reading a positioning property forces layout
-  // on an empty page.
-  document.body.innerHTML = '';
-  document.body.offsetTop;
-
-  document.replaceChild(fragment, document.documentElement);
+  var titleFragment = this.getFragment('TitleElement', ns);
+  var bodyFragment = this.getFragment('BodyElement', ns);
+  var titleElement = document.getElementsByTagName('title')[0];
+  titleElement.parentNode.replaceChild(titleFragment, titleElement);
+  document.body.parentNode.replaceChild(bodyFragment, document.body);
   this.context.unpause();
+  this.app.emit('routeDone', this, 'render');
 };
 
 Page.prototype.attach = function() {
   this.context.pause();
   var ns = this.model.get('$render.ns');
-  var view = this.getView('Page', ns);
-  view.attachTo(document, document.firstChild, this.context);
+  var titleView = this.getView('TitleElement', ns);
+  var bodyView = this.getView('BodyElement', ns);
+  var titleElement = document.getElementsByTagName('title')[0];
+  titleView.attachTo(titleElement.parentNode, titleElement, this.context);
+  bodyView.attachTo(document.body.parentNode, document.body, this.context);
   if (this.create) this.create(this.model, this.dom);
   this.context.unpause();
 };
@@ -4230,13 +2598,23 @@ Page.prototype._addModelListeners = function(eventModel) {
   var insertListener = model.on('insert', '**', function onInsert(path, index, values) {
     var segments = util.castSegments(path.split('.'));
     context.pause();
-    eventModel.insert(segments, index, values.length);
+    var array = model.get(path);
+    if (values.length < array.length) {
+      eventModel.insert(segments, index, values.length);
+    } else {
+      eventModel.set(segments);
+    }
     context.unpause();
   });
   var removeListener = model.on('remove', '**', function onRemove(path, index, values) {
     var segments = util.castSegments(path.split('.'));
     context.pause();
-    eventModel.remove(segments, index, values.length);
+    var array = model.get(path);
+    if (array && array.length) {
+      eventModel.remove(segments, index, values.length);
+    } else {
+      eventModel.set(segments);
+    }
     context.unpause();
   });
   var moveListener = model.on('move', '**', function onMove(path, from, to, howMany) {
@@ -4259,6 +2637,7 @@ Page.prototype._addModelListeners = function(eventModel) {
 Page.prototype._addContextListeners = function(eventModel) {
   this.context.meta.addBinding = addBinding;
   this.context.meta.removeBinding = removeBinding;
+  this.context.meta.removeNode = removeNode;
   this.context.meta.addItemContext = addItemContext;
   this.context.meta.removeItemContext = removeItemContext;
 
@@ -4277,11 +2656,20 @@ Page.prototype._addContextListeners = function(eventModel) {
         addDependencies(eventModel, expressions[i], binding);
       }
     } else {
-      addDependencies(eventModel, binding.template.expression, binding);
+      var expression = binding.template.expression;
+      var blockType = expression.meta && expression.meta.blockType;
+      if (blockType === 'with') return;
+      addDependencies(eventModel, expression, binding);
     }
   }
   function removeBinding(binding) {
     eventModel.removeBinding(binding);
+  }
+  function removeNode(node) {
+    var component = node.$markComponent;
+    if (component && !component.singleton) {
+      component.destroy();
+    }
   }
 };
 
@@ -4289,7 +2677,8 @@ function addDependencies(eventModel, expression, binding) {
   var dependencies = expression.dependencies(binding.context);
   if (!dependencies) return;
   for (var i = 0, len = dependencies.length; i < len; i++) {
-    eventModel.addBinding(dependencies[i], binding);
+    var dependency = dependencies[i];
+    if (dependency) eventModel.addBinding(dependency, binding);
   }
 }
 
@@ -4297,34 +2686,56 @@ function patchTextBinding(binding) {
   if (
     binding instanceof templates.AttributeBinding &&
     binding.name === 'value' &&
-    (binding.element.tagName === 'INPUT' || binding.element.tagName === 'TEXTAREA') &&
+    binding.element.tagName === 'INPUT' &&
+    documentListeners.inputSupportsSelection(binding.element) &&
     binding.template.expression.resolve(binding.context)
   ) {
-    binding.update = textUpdate;
+    binding.update = textInputUpdate;
+
+  } else if (
+    binding instanceof templates.NodeBinding &&
+    binding.node.parentNode.tagName === 'TEXTAREA' &&
+    binding.template.expression.resolve(binding.context)
+  ) {
+    binding.update = textAreaUpdate;
   }
 }
 
-function textUpdate(pass) {
+function textInputUpdate(pass) {
+  textUpdate(this, this.element, pass);
+}
+function textAreaUpdate(pass) {
+  var element = this.node.parentNode;
+  if (element) textUpdate(this, element, pass);
+}
+function textUpdate(binding, element, pass) {
   if (pass) {
-    if (pass.$event && pass.$event.target === this.element) {
+    if (pass.$event && pass.$event.target === element) {
       return;
     } else if (pass.$type === 'stringInsert') {
-      return textDiff.onStringInsert(this.element, pass.previous, pass.index, pass.text);
+      return textDiff.onStringInsert(element, pass.previous, pass.index, pass.text);
     } else if (pass.$type === 'stringRemove') {
-      return textDiff.onStringRemove(this.element, pass.previous, pass.index, pass.howMany);
+      return textDiff.onStringRemove(element, pass.previous, pass.index, pass.howMany);
     }
   }
-  this.template.update(this.context, this);
+
+  if (element.tagName === 'TEXTAREA') {
+    var template = binding.template;
+    var value = template.expression.get(binding.context);
+    return element.value = template.stringify(value);
+  }
+
+  binding.template.update(binding.context, binding);
 }
 
-util.serverRequire(__dirname + '/Page.server');
+util.serverRequire(module, './Page.server');
 
-}).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},"/node_modules/derby/lib")
-},{"./Controller":20,"./eventmodel":27,"./textDiff":28,"derby-templates":33,"racer/lib/util":56}],24:[function(require,module,exports){
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"./Controller":10,"./documentListeners":16,"./eventmodel":17,"./textDiff":18,"derby-templates":23,"racer/lib/util":46}],14:[function(require,module,exports){
 // This file is intentionally empty.
 // It's used in browserifying as the placeholder for serialized views.
 
-},{}],25:[function(require,module,exports){
+},{}],15:[function(require,module,exports){
 /*
  * components.js
  *
@@ -4347,64 +2758,90 @@ exports.ComponentFactory = ComponentFactory;
 exports.SingletonComponentFactory = SingletonComponentFactory;
 exports.createFactory = createFactory;
 
-function Component(id, model, parent) {
-  this.id = id;
-  this.model = model;
+function Component(parent, context, id, scope) {
   this.parent = parent;
-  this.page = parent && parent.page;
-  this.app = this.page && this.page.app;
-  this._scope = ['$components', id];
+  this.context = context;
+  this.id = id;
+  this._scope = scope;
 }
 
 util.mergeInto(Component.prototype, Controller.prototype);
 
 Component.prototype.destroy = function() {
   this.emit('destroy');
+  this.model.removeContextListeners();
+  this.model.destroy();
+  delete this.page._components[this.id];
+  var components = this.page._eventModel.object.$components;
+  if (components) delete components.object[this.id];
 };
 
-function createComponent(Constructor, context, componentContext, parent, attributes) {
-  var id = context.id();
-  var scope = '$components.' + id;
-  var root = context.controller.model.root;
-  var model = root.scope(scope);
-  model.set('id', id);
-  // Store a reference to the component's scope such that the expression
-  // getters are relative to the component
-  model.data = model.get();
+Component.prototype.get = function(viewName, unescaped) {
+  var view = this.getView(viewName);
+  return view.get(this.context, unescaped);
+};
 
-  // Render current attribute values and set on component model
-  if (attributes) {
-    for (var key in attributes) {
-      var attribute = attributes[key];
-      if (attribute instanceof templates.ParentWrapper) {
-        var segments = attribute.expression && attribute.expression.pathSegments(context);
-        if (segments) {
-          root.ref(scope + '.' + key, segments.join('.'));
-        } else {
-          var value = attribute.get(componentContext);
-          model.set(key, value);
-        }
-      } else if (typeof attribute === 'object') {
-        var value = expressions.renderValue(attribute, componentContext);
-        model.set(key, value);
-      } else {
-        model.set(key, attribute);
-      }
-    }
-  }
+Component.prototype.getFragment = function(viewName) {
+  var view = this.getView(viewName);
+  return view.getFragment(this.context);
+};
 
-  // Create the component instance. The component constructor should be an
-  // empty function and the actual initialization code should be done in the
+Component.prototype.getView = function(viewName) {
+  var contextView = this.context.getView();
+  return (viewName) ?
+    this.app.views.find(viewName, contextView.namespace) : contextView;
+};
+
+Component.prototype.getAttribute = function(key) {
+  var attributeContext = this.context.forAttribute(key);
+  if (!attributeContext) return;
+  var value = attributeContext.attributes[key];
+  return value && expressions.renderValue(value, attributeContext);
+};
+
+Component.prototype.setAttribute = function(key, value) {
+  this.context.parent.attributes[key] = value;
+};
+
+Component.prototype.setNullAttribute = function(key, value) {
+  var attributes = this.context.parent.attributes;
+  if (attributes[key] == null) attributes[key] = value;
+};
+
+function initComponent(context, component, parent, model, id, scope) {
+  // Do generic controller initialization
+  var componentContext = context.componentChild(component);
+  Controller.call(component, parent.app, parent.page, model);
+  Component.call(component, parent, componentContext, id, scope);
+
+  // Do the user-specific initialization. The component constructor should be
+  // an empty function and the actual initialization code should be done in the
   // component's init method. This means that we don't have to rely on users
   // properly calling the Component constructor method and avoids having to
   // play nice with how CoffeeScript extends class constructors
-  var component = componentContext.controller = new Constructor();
-  Controller.call(component);
-  Component.call(component, id, model, parent);
   emitHooks(context, component);
   component.emit('init', component);
   if (component.init) component.init(model);
-  return component;
+
+  return componentContext;
+}
+
+function setAttributes(context, model) {
+  if (!context.attributes) return;
+  // Set attribute values on component model
+  for (var key in context.attributes) {
+    var attribute = context.attributes[key];
+    var segments = (
+      attribute instanceof templates.ParentWrapper &&
+      attribute.expression &&
+      attribute.expression.pathSegments(context)
+    );
+    if (segments) {
+      model.root.ref(model._at + '.' + key, segments.join('.'));
+    } else {
+      model.set(key, attribute);
+    }
+  }
 }
 
 function emitHooks(context, component) {
@@ -4425,16 +2862,21 @@ function ComponentFactory(constructor) {
   this.constructor = constructor;
 }
 ComponentFactory.prototype.init = function(context) {
-  var componentContext = context.componentChild();
-  var component = createComponent(
-    this.constructor,
-    context,
-    componentContext,
-    context.controller,
-    context.attributes
-  );
-  component.page._components[component.id] = component;
-  return componentContext;
+  var component = new this.constructor();
+
+  var parent = context.controller;
+  var id = context.id();
+  var scope = ['$components', id];
+  var model = parent.model.root.eventContext(component);
+  model._at = scope.join('.');
+  model.set('id', id);
+  setAttributes(context, model);
+  // Store a reference to the component's scope such that the expression
+  // getters are relative to the component
+  model.data = model.get();
+  parent.page._components[id] = component;
+
+  return initComponent(context, component, parent, model, id, scope);
 };
 ComponentFactory.prototype.create = function(context) {
   var component = context.controller;
@@ -4448,27 +2890,22 @@ ComponentFactory.prototype.create = function(context) {
 function SingletonComponentFactory(constructor) {
   this.constructor = constructor;
   this.component = null;
-  this.created = false;
 }
 SingletonComponentFactory.prototype.init = function(context) {
-  var componentContext = context.componentChild();
+  var componentContext;
   if (this.component) {
-    componentContext.controller = this.component;
+    componentContext = context.componentChild(this.component);
     emitHooks(context, this.component);
   } else {
-    this.component = createComponent(this.constructor, context, componentContext);
+    this.component = new this.constructor();
+    var parent = context.controller.page;
+    var model = parent.model;
+    componentContext = initComponent(context, this.component, parent, model);
   }
   return componentContext;
 };
-SingletonComponentFactory.prototype.create = function(context) {
-  var component = context.controller;
-  component.emit('create', component);
-  // Call the component's create function for the first view render
-  if (!this.created && component.create) {
-    this.created = true;
-    component.create(component.model, component.dom);
-  }
-};
+// Don't call the create method for singleton components
+SingletonComponentFactory.prototype.create = function() {};
 
 App.prototype.component = function(viewName, constructor) {
   if (typeof viewName === 'function') {
@@ -4482,7 +2919,7 @@ App.prototype.component = function(viewName, constructor) {
   // Load template view from filename
   if (constructor.prototype.view) {
     var viewFilename = constructor.prototype.view;
-    viewName = path.basename(viewFilename, '.html');
+    viewName = constructor.prototype.name || path.basename(viewFilename, '.html');
     this.loadViews(viewFilename, viewName);
 
   } else if (!viewName) {
@@ -4516,19 +2953,31 @@ function extendComponent(constructor) {
   util.mergeInto(constructor.prototype, oldPrototype);
 }
 
-},{"./App":19,"./Controller":20,"derby-templates":33,"path":13,"racer/lib/util":56}],26:[function(require,module,exports){
+},{"./App":9,"./Controller":10,"derby-templates":23,"path":2,"racer/lib/util":46}],16:[function(require,module,exports){
 var textDiff = require('./textDiff');
 
 exports.add = addDocumentListeners;
+exports.inputSupportsSelection = inputSupportsSelection;
 
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-input-element.html#do-not-apply
-var INPUT_TYPE_SUPPORTS_SELECTION = {
-  text: true
-, search: true
-, url: true
-, tel: true
-, password: true
-};
+// TODO: Date types support
+function inputSupportsSelection(input) {
+  var type = input.type;
+  return (
+    type === 'text' ||
+    type === 'search' ||
+    type === 'url' ||
+    type === 'tel' ||
+    type === 'password'
+  );
+}
+function inputIsNumberValue(input) {
+  var type = input.type;
+  return (type === 'number' || (type === 'range' && !input.multiple));
+}
+function inputValue(input) {
+  return inputIsNumberValue(input) ? input.valueAsNumber : input.value;
+}
 
 function addDocumentListeners(doc) {
   doc.addEventListener('input', documentInput, true);
@@ -4537,38 +2986,38 @@ function addDocumentListeners(doc) {
 
 function documentInput(e) {
   var target = e.target;
-  if (!target) return;
-  var bindAttributes = target.$bindAttributes;
-  if (!bindAttributes) return;
-  var tagName = target.tagName.toLowerCase();
-  var pass = {$event: e};
 
-  if ((tagName === 'input' || tagName === 'textarea') && bindAttributes.value) {
-    var binding = bindAttributes.value;
-    if (INPUT_TYPE_SUPPORTS_SELECTION[target.type]) {
+  if (target.tagName === 'INPUT') {
+    var binding = target.$bindAttributes && target.$bindAttributes.value;
+    if (!binding || binding.isUnbound()) return;
+
+    if (inputSupportsSelection(target)) {
+      var pass = {$event: e};
       textDiffBinding(binding, target.value, pass);
     } else {
-      binding.template.expression.set(binding.context, target.value);
+      var value = inputValue(target);
+      binding.template.expression.set(binding.context, value);
     }
 
-  } else if (target.isContentEditable) {
-    // TODO
+  } else if (target.tagName === 'TEXTAREA' && target.childNodes.length === 1) {
+    var binding = target.firstChild && target.firstChild.$bindNode;
+    if (!binding || binding.isUnbound()) return;
+
+    var pass = {$event: e};
+    textDiffBinding(binding, target.value, pass);
   }
 }
 
 function documentChange(e) {
   var target = e.target;
-  if (!target) return;
   var bindAttributes = target.$bindAttributes;
-  var tagName = target.tagName.toLowerCase();
 
-  if (tagName === 'input') {
-    if (bindAttributes && bindAttributes.checked) {
-      var binding = bindAttributes.checked;
-      binding.template.expression.set(binding.context, target.checked);
-    }
+  if (target.tagName === 'INPUT') {
+    var binding = target.$bindAttributes && target.$bindAttributes.checked;
+    if (!binding || binding.isUnbound()) return;
+    binding.template.expression.set(binding.context, target.checked);
 
-  } else if (tagName === 'select') {
+  } else if (target.tagName === 'SELECT') {
     setOptionBindings(target);
   }
 }
@@ -4586,16 +3035,17 @@ function textDiffBinding(binding, value, pass) {
 
 function setOptionBindings(parent) {
   for (var node = parent.firstChild; node; node = node.nextSibling) {
-    if (node.tagName && node.tagName.toLowerCase() === 'option') {
+    if (node.tagName === 'OPTION') {
       var binding = node.$bindAttributes && node.$bindAttributes.selected;
-      if (binding) binding.template.expression.set(binding.context, node.selected);
+      if (!binding || binding.isUnbound()) continue;
+      binding.template.expression.set(binding.context, node.selected);
     } else if (node.hasChildNodes()) {
       setOptionBindings(node);
     }
   }
 }
 
-},{"./textDiff":28}],27:[function(require,module,exports){
+},{"./textDiff":18}],17:[function(require,module,exports){
 var expressions = require('derby-templates').expressions;
 
 // The many trees of bindings:
@@ -4654,7 +3104,7 @@ function ModelRef(model, item, segments, outside) {
   // value.
   this.model = model;
   this.segments = segments;
- 
+
   // Our current value.
   this.item = item;
 
@@ -4665,7 +3115,7 @@ function ModelRef(model, item, segments, outside) {
   // result is the EventModel of the evaluated version of the brackets. In
   // x[y].z, its the EventModel of x[y].
   this.result = outside.child(item).refChild(this);
-};
+}
 
 ModelRef.prototype.update = function() {
   var segments = expressions.pathSegments(this.segments);
@@ -4695,7 +3145,7 @@ function ItemContextsMap() {}
 
 function EventModel() {
   this.id = nextId++;
-  
+
   // Most of these won't ever be filled in, so I'm just leaving them null.
   //
   // These contain our EventModel children.
@@ -4812,11 +3262,11 @@ EventModel.prototype.at = function(segments) {
 };
 
 EventModel.prototype.isEmpty = function() {
-  if (!isEmpty(this.dependancies)) return false;
-  if (!isEmpty(this.itemContexts)) return false;
+  if (hasKeys(this.dependancies)) return false;
+  if (hasKeys(this.itemContexts)) return false;
 
   if (this.object) {
-    for (var k in this.object) return false;
+    if (hasKeys(this.object)) return false;
     this.object = null;
   }
 
@@ -4836,6 +3286,13 @@ EventModel.prototype.isEmpty = function() {
 
   return true;
 };
+
+function hasKeys(object) {
+  for (var key in object) {
+    return true;
+  }
+  return false;
+}
 
 
 // **** Updating the EventModel
@@ -4918,16 +3375,20 @@ EventModel.prototype._each = function(segments, pos, fn) {
 // on this node. See update() below if you want to update entire
 // subtrees.
 EventModel.prototype.localUpdate = function(pass) {
-  if (this.bindings) for (var id in this.bindings) {
-    var binding = this.bindings[id];
-    if (!binding.removed) binding.update(pass);
+  if (this.bindings) {
+    for (var id in this.bindings) {
+      var binding = this.bindings[id];
+      if (!binding.removed) binding.update(pass);
+    }
   }
 
   // If our value changed, we also need to update anything that depends on it
   // via refOut.
-  if (this.refOut) for (var id in this.refOut) {
-    var ref = this.refOut[id];
-    ref.update();
+  if (this.refOut) {
+    for (var id in this.refOut) {
+      var ref = this.refOut[id];
+      ref.update();
+    }
   }
 };
 
@@ -4987,8 +3448,10 @@ EventModel.prototype._updateArray = function(from, to) {
 };
 
 EventModel.prototype._updateObject = function() {
-  if (this.object) for (var key in this.object) {
-    this.object[key].update();
+  if (this.object) {
+    for (var key in this.object) {
+      this.object[key].update();
+    }
   }
 };
 
@@ -5023,9 +3486,11 @@ EventModel.prototype._insert = function(index, howMany) {
   }
 
   // Finally call our bindings.
-  if (this.bindings) for (var id in this.bindings) {
-    var binding = this.bindings[id];
-    binding.insert(index, howMany);
+  if (this.bindings) {
+    for (var id in this.bindings) {
+      var binding = this.bindings[id];
+      binding.insert(index, howMany);
+    }
   }
   this._updateObject();
 };
@@ -5043,9 +3508,11 @@ EventModel.prototype._remove = function(index, howMany) {
   }
 
   // Call bindings.
-  if (this.bindings) for (var id in this.bindings) {
-    var binding = this.bindings[id];
-    binding.remove(index, howMany);
+  if (this.bindings) {
+    for (var id in this.bindings) {
+      var binding = this.bindings[id];
+      binding.remove(index, howMany);
+    }
   }
   this._updateObject();
 };
@@ -5080,9 +3547,11 @@ EventModel.prototype._move = function(from, to, howMany) {
   }
 
   // Finally call our bindings.
-  if (this.bindings) for (var id in this.bindings) {
-    var binding = this.bindings[id];
-    binding.move(from, to, howMany);
+  if (this.bindings) {
+    for (var id in this.bindings) {
+      var binding = this.bindings[id];
+      binding.move(from, to, howMany);
+    }
   }
   this._updateObject();
 };
@@ -5135,7 +3604,7 @@ EventModel.prototype.move = function(segments, from, to, howMany) {
   });
 };
 
-},{"derby-templates":33}],28:[function(require,module,exports){
+},{"derby-templates":23}],18:[function(require,module,exports){
 exports.onStringInsert = onStringInsert;
 exports.onStringRemove = onStringRemove;
 exports.onTextInput = onTextInput;
@@ -5144,6 +3613,7 @@ function onStringInsert(el, previous, index, text) {
   function transformCursor(cursor) {
     return (index < cursor) ? cursor + text.length : cursor;
   }
+  previous || (previous = '');
   var newText = previous.slice(0, index) + text + previous.slice(index);
   replaceText(el, newText, transformCursor);
 }
@@ -5152,6 +3622,7 @@ function onStringRemove(el, previous, index, howMany) {
   function transformCursor(cursor) {
     return (index < cursor) ? cursor - Math.min(howMany, cursor - index) : cursor;
   }
+  previous || (previous = '');
   var newText = previous.slice(0, index) + previous.slice(index + howMany);
   replaceText(el, newText, transformCursor);
 }
@@ -5197,7 +3668,7 @@ function onTextInput(model, segments, value) {
   }
 }
 
-},{}],29:[function(require,module,exports){
+},{}],19:[function(require,module,exports){
 var derbyTemplates = require('derby-templates');
 var expressions = derbyTemplates.expressions;
 var operatorFns = derbyTemplates.operatorFns;
@@ -5451,7 +3922,7 @@ function unexpected(node) {
   throw new Error('Unexpected Esprima node: ' + JSON.stringify(node, null, 2));
 }
 
-},{"derby-templates":33,"esprima-derby":32}],30:[function(require,module,exports){
+},{"derby-templates":23,"esprima-derby":22}],20:[function(require,module,exports){
 var htmlUtil = require('html-util');
 var derbyTemplates = require('derby-templates');
 var templates = derbyTemplates.templates;
@@ -5522,21 +3993,28 @@ function createStringTemplate(source, view) {
 }
 
 function parseHtmlStart(tag, tagName, attributes, selfClosing) {
+  var lowerTagName = tagName.toLowerCase();
   var hooks;
-  if (tagName !== 'view' && !viewForTagName(tagName)) {
+  if (lowerTagName !== 'view' && !viewForTagName(lowerTagName)) {
     hooks = hooksFromAttributes(attributes, 'Element');
   }
   var attributesMap = parseAttributes(attributes);
-  var namespaceUri = (tagName.toLowerCase() === 'svg') ?
+  var namespaceUri = (lowerTagName === 'svg') ?
     templates.NAMESPACE_URIS.svg : parseNode.namespaceUri;
-  if (selfClosing || templates.VOID_ELEMENTS[tagName]) {
-    var element = new templates.Element(tagName, attributesMap, null, hooks, selfClosing, null, namespaceUri);
+  var Constructor = templates.Element;
+  if (lowerTagName === 'tag') {
+    Constructor = templates.DynamicElement;
+    tagName = attributesMap.is;
+    delete attributesMap.is;
+  }
+  if (selfClosing || templates.VOID_ELEMENTS[lowerTagName]) {
+    var element = new Constructor(tagName, attributesMap, null, hooks, selfClosing, null, namespaceUri);
     parseNode.content.push(element);
-    parseElementClose(tagName);
+    parseElementClose(lowerTagName);
   } else {
     parseNode = parseNode.child();
     parseNode.namespaceUri = namespaceUri;
-    var element = new templates.Element(tagName, attributesMap, parseNode.content, hooks, selfClosing, null, namespaceUri);
+    var element = new Constructor(tagName, attributesMap, parseNode.content, hooks, selfClosing, null, namespaceUri);
     parseNode.parent.content.push(element);
   }
 }
@@ -5583,7 +4061,10 @@ function parseAttributes(attributes) {
 function parseHtmlEnd(tag, tagName) {
   parseNode = parseNode.parent;
   var last = parseNode.last();
-  if (!(last instanceof templates.Element && last.tagName === tagName)) {
+  if (!(
+    (last instanceof templates.DynamicElement && tagName.toLowerCase() === 'tag') ||
+    (last instanceof templates.Element && last.tagName === tagName)
+  )) {
     throw new Error('Mismatched closing HTML tag: ' + tag);
   }
   parseElementClose(tagName);
@@ -5750,9 +4231,9 @@ function parseNamedViewElement(element, view, name) {
 
 function finishParseViewElement(viewAttributes, remaining, viewInstance) {
   if (!viewAttributes.hasOwnProperty('content') && remaining.length) {
-    viewAttributes.content = new templates.ParentWrapper(
-      new templates.Template(remaining)
-    );
+    var template = new templates.Template(remaining);
+    viewAttributes.content = (viewAttributes.within) ? template :
+      new templates.ParentWrapper(template);
   }
   parseNode.content.push(viewInstance);
 }
@@ -5851,9 +4332,9 @@ function parseNameAttribute(element) {
 
 function parseAttributeElement(element, name, viewAttributes) {
   var camelName = dashToCamelCase(name);
-  viewAttributes[camelName] = new templates.ParentWrapper(
-    new templates.Template(element.content)
-  );
+  var content = new templates.Template(element.content);
+  viewAttributes[camelName] = (element.attributes && element.attributes.within) ?
+    content : new templates.ParentWrapper(content);
 }
 
 function parseArrayElement(element, name, viewAttributes) {
@@ -6002,7 +4483,7 @@ function matchBraces(text, num, i, openChar, closeChar) {
   return i;
 }
 
-var blockRegExp = /^(if|unless|else if|each|with)\s+([\s\S]+?)(?:\s+as\s+([^,\s]+)\s*(?:,\s*(\S+))?)?$/;
+var blockRegExp = /^(if|unless|else if|each|with|on)\s+([\s\S]+?)(?:\s+as\s+([^,\s]+)\s*(?:,\s*(\S+))?)?$/;
 var valueRegExp = /^(?:(view|unbound|bound|unescaped)\s+)?([\s\S]*)/;
 
 function createExpression(source) {
@@ -6011,8 +4492,8 @@ function createExpression(source) {
 
   // Parse block expression //
 
-  // The block expressions `if`, `unless`, `else if`, `each`, and `with` must
-  // have a single blockType keyword and a path. They may have an optional
+  // The block expressions `if`, `unless`, `else if`, `each`, `with`, and `on`
+  // must have a single blockType keyword and a path. They may have an optional
   // alias assignment
   var match = blockRegExp.exec(source);
   var path;
@@ -6079,7 +4560,7 @@ function appendErrorMessage(err, message) {
   return new Error(err + message);
 }
 
-},{"./createPathExpression":29,"./markup":31,"derby-templates":33,"html-util":40}],31:[function(require,module,exports){
+},{"./createPathExpression":19,"./markup":21,"derby-templates":23,"html-util":30}],21:[function(require,module,exports){
 var EventEmitter = require('events').EventEmitter;
 var templates = require('derby-templates').templates;
 var createPathExpression = require('./createPathExpression');
@@ -6134,7 +4615,7 @@ function mergeInto(to, from) {
   return to;
 }
 
-},{"./createPathExpression":29,"derby-templates":33,"events":11}],32:[function(require,module,exports){
+},{"./createPathExpression":19,"derby-templates":23,"events":1}],22:[function(require,module,exports){
 /*
   Copyright (C) 2013 Ariya Hidayat <ariya.hidayat@gmail.com>
   Copyright (C) 2013 Thaddee Tyl <thaddee.tyl@gmail.com>
@@ -8813,13 +7294,13 @@ parseStatement: true, parseSourceElement: true */
 }));
 /* vim: set sw=4 ts=4 et tw=80 : */
 
-},{}],33:[function(require,module,exports){
+},{}],23:[function(require,module,exports){
 exports.contexts = require('./lib/contexts');
 exports.expressions = require('./lib/expressions');
 exports.operatorFns = require('./lib/operatorFns');
 exports.templates = require('./lib/templates');
 
-},{"./lib/contexts":34,"./lib/expressions":35,"./lib/operatorFns":36,"./lib/templates":37}],34:[function(require,module,exports){
+},{"./lib/contexts":24,"./lib/expressions":25,"./lib/operatorFns":26,"./lib/templates":27}],24:[function(require,module,exports){
 exports.ContextMeta = ContextMeta;
 exports.Context = Context;
 
@@ -8831,6 +7312,7 @@ function noop() {}
 function ContextMeta() {
   this.addBinding = noop;
   this.removeBinding = noop;
+  this.removeNode = noop;
   this.addItemContext = noop;
   this.removeItemContext = noop;
   this.views = null;
@@ -8883,18 +7365,15 @@ Context.prototype.id = function() {
 };
 
 Context.prototype.addBinding = function(binding) {
-  // If the template being rendered has an explicit bindType keyword, such as:
-  // {{unbound #item.text}}
   var expression = binding.template.expression;
-  var bindType = expression && expression.meta && expression.meta.bindType;
-  if (bindType === 'unbound') return;
-  if (bindType === 'bound') return this.meta.addBinding(binding);
-  // Otherwise, inherit binding from the context
-  if (this.unbound) return;
+  if (expression ? expression.isUnbound(this) : this.unbound) return;
   this.meta.addBinding(binding);
 };
 Context.prototype.removeBinding = function(binding) {
   this.meta.removeBinding(binding);
+};
+Context.prototype.removeNode = function(node) {
+  this.meta.removeNode(node);
 };
 
 Context.prototype.child = function(expression) {
@@ -8945,7 +7424,7 @@ Context.prototype.forAttribute = function(attribute) {
       if (attributes.hasOwnProperty(attribute)) return context;
       // If the attribute isn't found, but the attributes inherit, continue
       // looking in the next closest view context
-      if (!attributes.inherit) return;
+      if (!attributes.inherit && !attributes.extend) return;
     }
     context = context.parent;
   }
@@ -9005,7 +7484,8 @@ PendingCreate.prototype.run = function() {
   this.object.create(this.context);
 };
 
-},{}],35:[function(require,module,exports){
+},{}],25:[function(require,module,exports){
+(function (global){
 var serializeObject = require('serialize-object');
 var operatorFns = require('./operatorFns');
 var templates = require('./templates');
@@ -9054,9 +7534,17 @@ function pathSegments(segments) {
 
 function renderValue(value, context) {
   return (typeof value !== 'object') ? value :
-    (value instanceof templates.Template) ? value.get(context, true) :
+    (value instanceof templates.Template) ? renderTemplate(value, context) :
     (Array.isArray(value)) ? renderArray(value, context) :
     renderObject(value, context);
+}
+function renderTemplate(value, context) {
+  var i = 1000;
+  while (value instanceof templates.Template) {
+    if (!i--) throw new Error('Maximum template render passes exceeded');
+    value = value.get(context, true);
+  }
+  return value;
 }
 function renderArray(array, context) {
   for (var i = 0, len = array.length; i < len; i++) {
@@ -9072,6 +7560,7 @@ function renderObject(object, context) {
 }
 function hasTemplateProperty(object) {
   if (typeof object !== 'object') return false;
+  if (global.Node && object instanceof global.Node) return false;
   for (var key in object) {
     if (object[key] instanceof templates.Template) return true;
   }
@@ -9089,8 +7578,7 @@ function renderObjectProperties(object, context) {
   var out = {};
   for (var key in object) {
     var value = object[key];
-    out[key] = (value instanceof templates.Template) ?
-      value.get(context, true) : value;
+    out[key] = renderTemplate(value, context);
   }
   return out;
 }
@@ -9164,6 +7652,15 @@ Expression.prototype._getPatch = function(context, value) {
 Expression.prototype._resolvePatch = function(context, segments) {
   return (context && context.expression === this && context.item != null) ?
     segments.concat(context) : segments;
+};
+Expression.prototype.isUnbound = function(context) {
+  // If the template being rendered has an explicit bindType keyword, such as:
+  // {{unbound #item.text}}
+  var bindType = this.meta && this.meta.bindType;
+  if (bindType === 'unbound') return true;
+  if (bindType === 'bound') return false;
+  // Otherwise, inherit from the context
+  return context.unbound;
 };
 
 
@@ -9385,7 +7882,7 @@ FnExpression.prototype.get = function(context) {
   }
   return this._getPatch(context, value);
 };
-FnExpression.prototype.apply = function(context, extraInputs, modelExtras) {
+FnExpression.prototype.apply = function(context, extraInputs) {
   var controller = context.controller;
   var fn, parent;
   while (controller) {
@@ -9398,17 +7895,7 @@ FnExpression.prototype.apply = function(context, extraInputs, modelExtras) {
   }
   if (!fn) throw new Error('Function not found for: ' + this.segments.join('.'));
   var getFn = fn.get || fn;
-  if (modelExtras) {
-    for (var key in modelExtras) {
-      context.controller.model.data[key] = modelExtras[key];
-    }
-  }
   var out = this._applyFn(getFn, context, extraInputs, parent);
-  if (modelExtras) {
-    for (var key in modelExtras) {
-      delete context.controller.model.data[key];
-    }
-  }
   return out;
 };
 FnExpression.prototype._getInputs = function(context) {
@@ -9544,7 +8031,8 @@ function concat(a, b) {
   return a.concat(b);
 }
 
-},{"./operatorFns":36,"./templates":37,"serialize-object":39}],36:[function(require,module,exports){
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"./operatorFns":26,"./templates":27,"serialize-object":29}],26:[function(require,module,exports){
 // `-` and `+` can be either unary or binary, so all unary operators are
 // postfixed with `U` to differentiate
 
@@ -9691,7 +8179,7 @@ exports.set = {
   }
 };
 
-},{}],37:[function(require,module,exports){
+},{}],27:[function(require,module,exports){
 var saddle = require('saddle');
 var serializeObject = require('serialize-object');
 
@@ -9711,9 +8199,18 @@ exports.Views = Views;
 exports.MarkupHook = MarkupHook;
 exports.ElementOn = ElementOn;
 exports.ComponentOn = ComponentOn;
+exports.ComponentMarker = ComponentMarker;
 exports.MarkupAs = MarkupAs;
 
 exports.emptyTemplate = new saddle.Template([]);
+
+// Add ::isUnbound to Template && Binding
+saddle.Template.prototype.isUnbound = function(context) {
+  return context.unbound;
+};
+saddle.Binding.prototype.isUnbound = function() {
+  return this.template.expression.isUnbound(this.context);
+};
 
 // Add Template::resolve
 saddle.Template.prototype.resolve = function() {};
@@ -9821,42 +8318,59 @@ function View(views, name, source, options) {
 }
 View.prototype = new saddle.Template();
 View.prototype.type = 'View';
-View.prototype.serialize = function(options) {
-  var template = this.template || this._parse();
-  return 'views.register(' + serializeObject.args([
-      this.name
-    , (options && options.minify) ? null : this.source
-    , (hasKeys(this.options)) ? this.options : null
-    ]) + ').template = ' + template.serialize() + ';';
+View.prototype.serialize = function() {
+  return null;
+};
+View.prototype._isComponent = function(context) {
+  return this.componentFactory &&
+    context.attributes && !context.attributes.extend;
+};
+View.prototype._initComponent = function(context) {
+  return (this._isComponent(context)) ?
+    this.componentFactory.init(context) : context;
+};
+View.prototype._queueCreate = function(context, viewContext) {
+  if (this._isComponent(context)) {
+    viewContext.queueCreate(this.componentFactory);
+  }
 };
 View.prototype.get = function(context, unescaped) {
-  if (this.componentFactory) context = this.componentFactory.init(context);
-  var template = this.template || this._parse();
-  return template.get(context, unescaped);
+  var viewContext = this._initComponent(context);
+  var template = this.template || this.parse();
+  return template.get(viewContext, unescaped);
 };
 View.prototype.getFragment = function(context, binding) {
-  if (this.componentFactory) context = this.componentFactory.init(context);
-  var template = this.template || this._parse();
-  var fragment = template.getFragment(context, binding);
-  if (this.componentFactory) context.queueCreate(this.componentFactory);
+  var viewContext = this._initComponent(context);
+  var template = this.template || this.parse();
+  var fragment = template.getFragment(viewContext, binding);
+  this._queueCreate(context, viewContext);
   return fragment;
 };
 View.prototype.appendTo = function(parent, context) {
-  if (this.componentFactory) context = this.componentFactory.init(context);
-  var template = this.template || this._parse();
-  template.appendTo(parent, context);
-  if (this.componentFactory) context.queueCreate(this.componentFactory);
+  var viewContext = this._initComponent(context);
+  var template = this.template || this.parse();
+  template.appendTo(parent, viewContext);
+  this._queueCreate(context, viewContext);
 };
 View.prototype.attachTo = function(parent, node, context) {
-  if (this.componentFactory) context = this.componentFactory.init(context);
-  var template = this.template || this._parse();
-  var node = template.attachTo(parent, node, context);
-  if (this.componentFactory) context.queueCreate(this.componentFactory);
+  var viewContext = this._initComponent(context);
+  var template = this.template || this.parse();
+  var node = template.attachTo(parent, node, viewContext);
+  this._queueCreate(context, viewContext);
   return node;
 };
 View.prototype.dependencies = function(context) {
-  var template = this.template || this._parse();
+  var template = this.template || this.parse();
   return template.dependencies(context);
+};
+View.prototype.parse = function() {
+  this._parse();
+  if (this.componentFactory) {
+    var hooks = [new ComponentMarker()];
+    var marker = new saddle.Comment(this.name, hooks);
+    this.template.content.unshift(marker);
+  }
+  return this.template;
 };
 // View.prototype._parse is defined in parsing.js, so that it doesn't have to
 // be included in the client if templates are all parsed server-side
@@ -10016,7 +8530,14 @@ Views.prototype.serialize = function(options) {
     'var expressions = derbyTemplates.expressions;' +
     'var templates = derbyTemplates.templates;';
   for (var name in this.nameMap) {
-    out += this.nameMap[name].serialize(options);
+    var view = this.nameMap[name];
+    if (options && !options.server && view.options && view.options.serverOnly) continue;
+    var template = view.template || view.parse();
+    out += 'views.register(' + serializeObject.args([
+      view.name
+    , (options && options.minify) ? null : view.source
+    , (hasKeys(view.options)) ? view.options : null
+    ]) + ').template = ' + template.serialize() + ';';
   }
   return out + '}';
 };
@@ -10046,7 +8567,13 @@ ElementOn.prototype.serialize = function() {
 ElementOn.prototype.emit = function(context, element) {
   var expression = this.expression;
   element.addEventListener(this.name, function elementOnListener(event) {
-    return expression.apply(context, null, {$event: event, $element: element});
+    var modelData = context.controller.model.data;
+    modelData.$event = event;
+    modelData.$element = element;
+    var out = expression.apply(context);
+    delete modelData.$event;
+    delete modelData.$element;
+    return out;
   }, false);
 };
 
@@ -10065,6 +8592,16 @@ ComponentOn.prototype.emit = function(context, component) {
     var args = arguments.length && Array.prototype.slice.call(arguments);
     return expression.apply(context, args);
   });
+};
+
+function ComponentMarker() {}
+ComponentMarker.prototype = new MarkupHook();
+ComponentMarker.prototype.type = 'ComponentMarker';
+ComponentMarker.prototype.serialize = function() {
+  return serializeObject.instance(this);
+};
+ComponentMarker.prototype.emit = function(context, node) {
+  node.$markComponent = context.controller;
 };
 
 function MarkupAs(segments) {
@@ -10100,7 +8637,7 @@ function hasKeys(value) {
   return false;
 }
 
-},{"saddle":38,"serialize-object":39}],38:[function(require,module,exports){
+},{"saddle":28,"serialize-object":29}],28:[function(require,module,exports){
 if (typeof require === 'function') {
   var serializeObject = require('serialize-object');
 }
@@ -10184,6 +8721,7 @@ exports.DynamicComment = DynamicComment;
 exports.Html = Html;
 exports.DynamicHtml = DynamicHtml;
 exports.Element = Element;
+exports.DynamicElement = DynamicElement;
 exports.Block = Block;
 exports.ConditionalBlock = ConditionalBlock;
 exports.EachBlock = EachBlock;
@@ -10334,6 +8872,7 @@ function attachText(parent, node, data, template, context) {
       addNodeBinding(template, context, node);
       return node.nextSibling;
     }
+    data = normalizeLineBreaks(data);
     // Split adjacent text nodes that would have been merged together in HTML
     var nextNode = splitData(node, data.length);
     if (node.data !== data) {
@@ -10352,27 +8891,30 @@ function attachText(parent, node, data, template, context) {
   throw attachError(parent, node);
 }
 
-function Comment(data) {
+function Comment(data, hooks) {
   this.data = data;
+  this.hooks = hooks;
 }
 Comment.prototype = new Template();
 Comment.prototype.get = function() {
   return '<!--' + this.data + '-->';
 };
-Comment.prototype.appendTo = function(parent) {
+Comment.prototype.appendTo = function(parent, context) {
   var node = document.createComment(this.data);
+  emitHooks(this.hooks, context, node);
   parent.appendChild(node);
 };
-Comment.prototype.attachTo = function(parent, node) {
-  return attachComment(parent, node, this.data);
+Comment.prototype.attachTo = function(parent, node, context) {
+  return attachComment(parent, node, this.data, this, context);
 };
 Comment.prototype.type = 'Comment';
 Comment.prototype.serialize = function() {
-  return serializeObject.instance(this, this.data);
+  return serializeObject.instance(this, this.data, this.hooks);
 }
 
-function DynamicComment(expression) {
+function DynamicComment(expression, hooks) {
   this.expression = expression;
+  this.hooks = hooks;
 }
 DynamicComment.prototype = new Template();
 DynamicComment.prototype.get = function(context) {
@@ -10398,7 +8940,7 @@ DynamicComment.prototype.update = function(context, binding) {
 };
 DynamicComment.prototype.type = 'DynamicComment';
 DynamicComment.prototype.serialize = function() {
-  return serializeObject.instance(this, this.expression);
+  return serializeObject.instance(this, this.expression, this.hooks);
 }
 
 function attachComment(parent, node, data, template, context) {
@@ -10419,8 +8961,10 @@ function attachComment(parent, node, data, template, context) {
 }
 
 function addNodeBinding(template, context, node) {
-  if (!context) return;
-  context.addBinding(new NodeBinding(template, context, node));
+  emitHooks(template.hooks, context, node);
+  if (template.expression) {
+    context.addBinding(new NodeBinding(template, context, node));
+  }
 }
 
 function Html(data) {
@@ -10480,7 +9024,8 @@ DynamicHtml.prototype.update = function(context, binding) {
   var value = getUnescapedValue(this.expression, context);
   var html = this.stringify(value);
   var fragment = createHtmlFragment(binding.start.parentNode, html);
-  replaceRange(context, start, end, fragment, binding);
+  var innerOnly = true;
+  replaceRange(context, start, end, fragment, binding, innerOnly);
 };
 DynamicHtml.prototype.type = 'DynamicHtml';
 DynamicHtml.prototype.serialize = function() {
@@ -10525,20 +9070,23 @@ function DynamicAttribute(expression, ns) {
   // In attributes, expression may be an instance of Template or Expression
   this.expression = expression;
   this.ns = ns;
+  this.elementNs = null;
 }
 DynamicAttribute.prototype = new Attribute();
 DynamicAttribute.prototype.get = function(context) {
   return getUnescapedValue(this.expression, context);
 };
-DynamicAttribute.prototype.getBound = function(context, element, name) {
+DynamicAttribute.prototype.getBound = function(context, element, name, elementNs) {
+  this.elementNs = elementNs;
   context.addBinding(new AttributeBinding(this, context, element, name));
   return getUnescapedValue(this.expression, context);
 };
 DynamicAttribute.prototype.update = function(context, binding) {
   var value = getUnescapedValue(this.expression, context);
   var element = binding.element;
-  var propertyName = !element.ns && UPDATE_PROPERTIES[binding.name];
+  var propertyName = !this.elementNs && UPDATE_PROPERTIES[binding.name];
   if (propertyName) {
+    if (propertyName === 'value' && (element.value === value || element.valueAsNumber === value)) return;
     if (value === void 0) value = null;
     element[propertyName] = value;
     return;
@@ -10581,15 +9129,22 @@ function Element(tagName, attributes, content, hooks, selfClosing, notClosed, ns
   this.notClosed = notClosed;
   this.ns = ns;
 
-  var lowerTagName = tagName.toLowerCase();
-  var isVoid = VOID_ELEMENTS[lowerTagName];
-  this.startClose = (selfClosing) ? ' />' : '>';
-  this.endTag = (isVoid || selfClosing || notClosed) ? '' : '</' + tagName + '>';
+  this.endTag = getEndTag(tagName, selfClosing, notClosed);
+  this.startClose = getStartClose(selfClosing);
+  var lowerTagName = tagName && tagName.toLowerCase();
   this.unescapedContent = (lowerTagName === 'script' || lowerTagName === 'style');
 }
 Element.prototype = new Template();
+Element.prototype.getTagName = function() {
+  return this.tagName;
+};
+Element.prototype.getEndTag = function() {
+  return this.endTag;
+};
 Element.prototype.get = function(context) {
-  var tagItems = [this.tagName];
+  var tagName = this.getTagName(context);
+  var endTag = this.getEndTag(tagName);
+  var tagItems = [tagName];
   for (var key in this.attributes) {
     var value = this.attributes[key].get(context);
     if (value === true) {
@@ -10601,18 +9156,19 @@ Element.prototype.get = function(context) {
   var startTag = '<' + tagItems.join(' ') + this.startClose;
   if (this.content) {
     var inner = contentHtml(this.content, context, this.unescapedContent);
-    return startTag + inner + this.endTag;
+    return startTag + inner + endTag;
   }
-  return startTag + this.endTag;
+  return startTag + endTag;
 };
 Element.prototype.appendTo = function(parent, context) {
+  var tagName = this.getTagName(context);
   var element = (this.ns) ?
-    document.createElementNS(this.ns, this.tagName) :
-    document.createElement(this.tagName);
+    document.createElementNS(this.ns, tagName) :
+    document.createElement(tagName);
   emitHooks(this.hooks, context, element);
   for (var key in this.attributes) {
     var attribute = this.attributes[key];
-    var value = attribute.getBound(context, element, key);
+    var value = attribute.getBound(context, element, key, this.ns);
     if (value === false || value == null) continue;
     var propertyName = !this.ns && CREATE_PROPERTIES[key];
     if (propertyName) {
@@ -10630,17 +9186,18 @@ Element.prototype.appendTo = function(parent, context) {
   parent.appendChild(element);
 };
 Element.prototype.attachTo = function(parent, node, context) {
+  var tagName = this.getTagName(context);
   if (
     !node ||
     node.nodeType !== 1 ||
-    (node.tagName).toLowerCase() !== (this.tagName).toLowerCase()
+    node.tagName.toLowerCase() !== tagName.toLowerCase()
   ) {
     throw attachError(parent, node);
   }
   emitHooks(this.hooks, context, node);
   for (var key in this.attributes) {
     // Get each attribute to create bindings
-    this.attributes[key].getBound(context, node, key);
+    this.attributes[key].getBound(context, node, key, this.ns);
     // TODO: Ideally, this would also check that the node's current attributes
     // are equivalent, but there are some tricky edge cases
   }
@@ -10660,6 +9217,37 @@ Element.prototype.serialize = function() {
   , this.ns
   );
 };
+
+function DynamicElement(tagName, attributes, content, hooks, selfClosing, notClosed, ns) {
+  this.tagName = tagName;
+  this.attributes = attributes;
+  this.content = content;
+  this.hooks = hooks;
+  this.selfClosing = selfClosing;
+  this.notClosed = notClosed;
+  this.ns = ns;
+
+  this.startClose = getStartClose(selfClosing);
+  this.unescapedContent = false;
+}
+DynamicElement.prototype = new Element();
+DynamicElement.prototype.getTagName = function(context) {
+  return getUnescapedValue(this.tagName, context);
+};
+DynamicElement.prototype.getEndTag = function(tagName) {
+  return getEndTag(tagName, this.selfClosing, this.notClosed);
+};
+DynamicElement.prototype.type = 'DynamicElement';
+
+function getStartClose(selfClosing) {
+  return (selfClosing) ? ' />' : '>';
+}
+
+function getEndTag(tagName, selfClosing, notClosed) {
+  var lowerTagName = tagName && tagName.toLowerCase();
+  var isVoid = VOID_ELEMENTS[lowerTagName];
+  return (isVoid || selfClosing || notClosed) ? '' : '</' + tagName + '>';
+}
 
 function getAttributeValue(element, name) {
   var propertyName = UPDATE_PROPERTIES[name];
@@ -10706,60 +9294,53 @@ Block.prototype.type = 'Block';
 Block.prototype.serialize = function() {
   return serializeObject.instance(this, this.expression, this.content);
 };
+Block.prototype.update = function(context, binding) {
+  // Get start and end in advance, since binding is mutated in getFragment
+  var start = binding.start;
+  var end = binding.end;
+  var fragment = this.getFragment(context, binding);
+  replaceRange(context, start, end, fragment, binding);
+};
 
 function ConditionalBlock(expressions, contents) {
   this.expressions = expressions;
   this.beginning = expressions.join('; ');
   this.ending = '/' + this.beginning;
   this.contents = contents;
-  this.last = null;
 }
 ConditionalBlock.prototype = new Block();
 ConditionalBlock.prototype.get = function(context, unescaped) {
-  var html = '';
-  for (var i = 0, len = this.expressions.length; i < len; i++) {
-    var expression = this.expressions[i];
-    if (expression.truthy(context)) {
-      var blockContext = context.child(expression);
-      html += contentHtml(this.contents[i], blockContext, unescaped);
-      break;
-    }
-  }
-  return html;
+  var condition = this.getCondition(context);
+  if (condition == null) return '';
+  var expression = this.expressions[condition];
+  var blockContext = context.child(expression);
+  return contentHtml(this.contents[condition], blockContext, unescaped);
 };
 ConditionalBlock.prototype.appendTo = function(parent, context, binding) {
   var start = document.createComment(this.beginning);
   var end = document.createComment(this.ending);
   parent.appendChild(start);
-  this.last = null;
-  for (var i = 0, len = this.expressions.length; i < len; i++) {
-    var expression = this.expressions[i];
-    if (expression.truthy(context)) {
-      this.last = i;
-      var blockContext = context.child(expression);
-      appendContent(parent, this.contents[i], blockContext);
-      break;
-    }
+  var condition = this.getCondition(context);
+  if (condition != null) {
+    var expression = this.expressions[condition];
+    var blockContext = context.child(expression);
+    appendContent(parent, this.contents[condition], blockContext);
   }
   parent.appendChild(end);
-  updateRange(context, binding, this, start, end);
+  updateRange(context, binding, this, start, end, null, condition);
 };
 ConditionalBlock.prototype.attachTo = function(parent, node, context) {
   var start = document.createComment(this.beginning);
   var end = document.createComment(this.ending);
   parent.insertBefore(start, node || null);
-  this.last = null;
-  for (var i = 0, len = this.expressions.length; i < len; i++) {
-    var expression = this.expressions[i];
-    if (expression.truthy(context)) {
-      this.last = i;
-      var blockContext = context.child(expression);
-      node = attachContent(parent, node, this.contents[i], blockContext);
-      break;
-    }
+  var condition = this.getCondition(context);
+  if (condition != null) {
+    var expression = this.expressions[condition];
+    var blockContext = context.child(expression);
+    node = attachContent(parent, node, this.contents[condition], blockContext);
   }
   parent.insertBefore(end, node || null);
-  updateRange(context, null, this, start, end);
+  updateRange(context, null, this, start, end, null, condition);
   return node;
 };
 ConditionalBlock.prototype.type = 'ConditionalBlock';
@@ -10767,19 +9348,21 @@ ConditionalBlock.prototype.serialize = function() {
   return serializeObject.instance(this, this.expressions, this.contents);
 };
 ConditionalBlock.prototype.update = function(context, binding) {
-  var value = null;
-  for (var i = 0, len = this.expressions.length; i < len; i++) {
-    if (this.expressions[i].truthy(context)) {
-      value = i;
-      break;
-    }
-  }
-  if (value === this.last) return;
+  var condition = this.getCondition(context);
+  if (condition === binding.condition) return;
+  binding.condition = condition;
   // Get start and end in advance, since binding is mutated in getFragment
   var start = binding.start;
   var end = binding.end;
   var fragment = this.getFragment(context, binding);
   replaceRange(context, start, end, fragment, binding);
+};
+ConditionalBlock.prototype.getCondition = function(context) {
+  for (var i = 0, len = this.expressions.length; i < len; i++) {
+    if (this.expressions[i].truthy(context)) {
+      return i;
+    }
+  }
 };
 
 function EachBlock(expression, content, elseContent) {
@@ -10933,14 +9516,15 @@ function indexStartNode(binding, index) {
   }
 }
 
-function updateRange(context, binding, template, start, end, itemFor) {
+function updateRange(context, binding, template, start, end, itemFor, condition) {
   if (binding) {
     binding.start = start;
     binding.end = end;
+    binding.condition = condition;
     setNodeProperty(start, '$bindStart', binding);
     setNodeProperty(end, '$bindEnd', binding);
   } else {
-    context.addBinding(new RangeBinding(template, context, start, end, itemFor));
+    context.addBinding(new RangeBinding(template, context, start, end, itemFor, condition));
   }
 }
 
@@ -10962,7 +9546,7 @@ function contentHtml(content, context, unescaped) {
   }
   return html;
 }
-function replaceRange(context, start, end, fragment, binding) {
+function replaceRange(context, start, end, fragment, binding, innerOnly) {
   var parent = start.parentNode;
   // This shouldn't happen if bindings are cleaned up properly, but check
   // in case they aren't
@@ -10972,12 +9556,16 @@ function replaceRange(context, start, end, fragment, binding) {
     emitRemoved(context, start, binding);
     return;
   }
-  // Remove all nodes from start to end, inclusive
-  var node = start;
+  // Remove all nodes from start to end
+  var node = (innerOnly) ? start.nextSibling : start;
   var nextNode;
   while (node) {
     nextNode = node.nextSibling;
     emitRemoved(context, node, binding);
+    if (innerOnly && node === end) {
+      nextNode = end;
+      break;
+    }
     parent.removeChild(node);
     if (node === end) break;
     node = nextNode;
@@ -10986,6 +9574,7 @@ function replaceRange(context, start, end, fragment, binding) {
   parent.insertBefore(fragment, nextNode || null);
 }
 function emitRemoved(context, node, ignore) {
+  context.removeNode(node);
   var binding = node.$bindNode;
   if (binding && binding !== ignore) context.removeBinding(binding);
   binding = node.$bindStart;
@@ -11051,12 +9640,13 @@ function AttributeBinding(template, context, element, name) {
 AttributeBinding.prototype = new Binding();
 AttributeBinding.prototype.type = 'AttributeBinding';
 
-function RangeBinding(template, context, start, end, itemFor) {
+function RangeBinding(template, context, start, end, itemFor, condition) {
   this.template = template;
   this.context = context;
   this.start = start;
   this.end = end;
   this.itemFor = itemFor;
+  this.condition = condition;
   this.meta = null;
   setNodeProperty(start, '$bindStart', this);
   setNodeProperty(end, '$bindEnd', this);
@@ -11111,10 +9701,10 @@ function escapeAttribute(string) {
 }
 
 
-//// IE shims & workarounds ////
+//// Shims & workarounds ////
 
 // General notes:
-// 
+//
 // In all cases, Node.insertBefore should have `|| null` after its second
 // argument. IE works correctly when the argument is ommitted or equal
 // to null, but it throws and error if it is equal to undefined.
@@ -11139,9 +9729,32 @@ function setNodeProperty(node, key, value) {
   return node[key] = value;
 }
 
+function normalizeLineBreaks(string) {
+  return string;
+}
+
 (function() {
   // Don't try to shim in Node.js environment
   if (typeof document === 'undefined') return;
+
+  var div = document.createElement('div');
+  div.innerHTML = '\r\n<br>\n'
+  var windowsLength = div.firstChild.data.length;
+  var unixLength = div.lastChild.data.length;
+  if (windowsLength === 1 && unixLength === 1) {
+    normalizeLineBreaks = function(string) {
+      return string.replace(/\r\n/g, '\n');
+    };
+  } else if (windowsLength === 2 && unixLength === 2) {
+    normalizeLineBreaks = function(string) {
+      return string.replace(/(^|[^\r])(\n+)/g, function(match, value, newLines) {
+        for (var i = newLines.length; i--;) {
+          value += '\r\n';
+        }
+        return value;
+      });
+    };
+  }
 
   // TODO: Shim createHtmlFragment for old IE
 
@@ -11155,7 +9768,7 @@ function setNodeProperty(node, key, value) {
 
   // In IE, input.defaultValue doesn't work correctly, so use input.value,
   // which mistakenly but conveniently sets both the value property and attribute.
-  // 
+  //
   // Surprisingly, in IE <=7, input.defaultChecked must be used instead of
   // input.checked before the input is in the document.
   // http://webbugtrack.blogspot.com/2007/11/bug-299-setattribute-checked-does-not.html
@@ -11198,7 +9811,7 @@ function setNodeProperty(node, key, value) {
   }
 })();
 
-},{"serialize-object":39}],39:[function(require,module,exports){
+},{"serialize-object":29}],29:[function(require,module,exports){
 exports.instance = serializeInstance;
 exports.args = serializeArgs;
 exports.value = serializeValue;
@@ -11269,7 +9882,7 @@ function formatString(value) {
   return '\'' + escaped + '\'';
 }
 
-},{}],40:[function(require,module,exports){
+},{}],30:[function(require,module,exports){
 var parse = require('./parse');
 
 module.exports = {
@@ -11368,7 +9981,7 @@ function minify(html) {
   return minified
 }
 
-},{"./parse":41}],41:[function(require,module,exports){
+},{"./parse":31}],31:[function(require,module,exports){
 var startTag = /^<([^\s=\/!>]+)((?:\s+[^\s=\/>]+(?:\s*=\s*(?:(?:"[^"]*")|(?:'[^']*')|[^>\s]+)?)?)*)\s*(\/?)\s*>/
   , endTag = /^<\/([^\s=\/!>]+)[^>]*>/
   , comment = /^<!--([\s\S]*?)-->/
@@ -11499,7 +10112,7 @@ module.exports = function(html, options) {
   }
 }
 
-},{}],42:[function(require,module,exports){
+},{}],32:[function(require,module,exports){
 module.exports = Doc;
 
 function Doc(model, collectionName, id) {
@@ -11517,7 +10130,7 @@ Doc.prototype._errorMessage = function(description, segments, value) {
     JSON.stringify(value, null, 2);
 };
 
-},{}],43:[function(require,module,exports){
+},{}],33:[function(require,module,exports){
 var Doc = require('./Doc');
 var util = require('../util');
 
@@ -11729,8 +10342,8 @@ function nodeCreateArray(node, key) {
   return node[key] || (node[key] = []);
 }
 
-},{"../util":56,"./Doc":42}],44:[function(require,module,exports){
-var uuid = require('node-uuid');
+},{"../util":46,"./Doc":32}],34:[function(require,module,exports){
+var uuid = require('uuid');
 
 Model.INITS = [];
 
@@ -11769,10 +10382,11 @@ function ChildModel(model) {
   this._at = model._at;
   this._pass = model._pass;
   this._silent = model._silent;
+  this._eventContext = model._eventContext;
 }
 ChildModel.prototype = new Model();
 
-},{"node-uuid":59}],45:[function(require,module,exports){
+},{"uuid":50}],35:[function(require,module,exports){
 module.exports = require('./Model');
 
 require('./events');
@@ -11786,7 +10400,7 @@ require('./filter');
 require('./refList');
 require('./ref');
 
-},{"./Model":44,"./collections":46,"./events":48,"./filter":49,"./fn":50,"./mutators":51,"./paths":52,"./ref":53,"./refList":54,"./setDiff":55}],46:[function(require,module,exports){
+},{"./Model":34,"./collections":36,"./events":38,"./filter":39,"./fn":40,"./mutators":41,"./paths":42,"./ref":43,"./refList":44,"./setDiff":45}],36:[function(require,module,exports){
 var Model = require('./Model');
 var LocalDoc = require('./LocalDoc');
 var util = require('../util');
@@ -11863,24 +10477,27 @@ Model.prototype.getOrCreateDoc = function(collectionName, id, data) {
  */
 Model.prototype.destroy = function(subpath) {
   var segments = this._splitPath(subpath);
-  var collections = this.root.collections;
+  // Silently remove all types of listeners within subpath
+  var silentModel = this.silent();
+  silentModel.removeAllListeners(null, subpath);
+  silentModel._removeAllRefs(segments);
+  silentModel._stopAll(segments);
+  silentModel._removeAllFilters(segments);
   // Silently remove all model data within subpath
   if (segments.length === 0) {
-    for (var collectionName in collections) {
-      var collection = collections[collectionName];
-      collection && collection.destroy();
+    this.root.collections = new CollectionMap();
+    // Delete each property of data instead of creating a new object so that
+    // it is possible to continue using a reference to the original data object
+    var data = this.root.data;
+    for (var key in data) {
+      delete data[key];
     }
   } else if (segments.length === 1) {
-    var collection = collections[segments[0]];
+    var collection = this.getCollection(segments[0]);
     collection && collection.destroy();
   } else {
-    this.silent()._del(segments);
+    silentModel._del(segments);
   }
-  // Remove all types of listeners within subpath
-  this.removeAllRefs(subpath);
-  this.stopAll(subpath);
-  this.removeAllFilters(subpath);
-  this.removeAllListeners(null, subpath);
 };
 
 function Collection(model, name, Doc) {
@@ -11934,7 +10551,7 @@ function noKeys(object) {
   return true;
 }
 
-},{"../util":56,"./LocalDoc":43,"./Model":44}],47:[function(require,module,exports){
+},{"../util":46,"./LocalDoc":33,"./Model":34}],37:[function(require,module,exports){
 var defaultFns = module.exports = new DefaultFns();
 
 defaultFns.reverse = new FnPair(getReverse, setReverse);
@@ -11965,7 +10582,7 @@ function desc(a, b) {
   return 0;
 }
 
-},{}],48:[function(require,module,exports){
+},{}],38:[function(require,module,exports){
 var EventEmitter = require('events').EventEmitter;
 var util = require('../util');
 var Model = require('./Model');
@@ -11997,7 +10614,9 @@ Model.INITS.push(function(model) {
   }
 
   model.root._mutatorEventQueue = null;
-  model._pass = new Passed({}, {});
+  model.root._pass = new Passed({}, {});
+  model.root._silent = null;
+  model.root._eventContext = null;
 });
 
 util.mergeInto(Model.prototype, EventEmitter.prototype);
@@ -12024,33 +10643,29 @@ Model.prototype.emit = function(type) {
   if (type === 'error') {
     return this._emit.apply(this, arguments);
   }
-  try {
-    if (Model.MUTATOR_EVENTS[type]) {
-      if (this._silent) return this;
-      var segments = arguments[1];
-      var eventArgs = arguments[2];
-      if (this.root._mutatorEventQueue) {
-        this.root._mutatorEventQueue.push([type, segments, eventArgs]);
-        return this;
-      }
-      this.root._mutatorEventQueue = [];
-      this._emit(type, segments, eventArgs);
-      this._emit('all', segments, [type].concat(eventArgs));
-      while (this.root._mutatorEventQueue.length) {
-        var queued = this.root._mutatorEventQueue.shift();
-        type = queued[0];
-        segments = queued[1];
-        eventArgs = queued[2];
-        this._emit(type, segments, eventArgs);
-        this._emit('all', segments, [type].concat(eventArgs));
-      }
-      this.root._mutatorEventQueue = null;
+  if (Model.MUTATOR_EVENTS[type]) {
+    if (this._silent) return this;
+    var segments = arguments[1];
+    var eventArgs = arguments[2];
+    if (this.root._mutatorEventQueue) {
+      this.root._mutatorEventQueue.push([type, segments, eventArgs]);
       return this;
     }
-    return this._emit.apply(this, arguments);
-  } catch (err) {
-    this.emit('error', err);
+    this.root._mutatorEventQueue = [];
+    this._emit(type, segments, eventArgs);
+    this._emit('all', segments, [type].concat(eventArgs));
+    while (this.root._mutatorEventQueue.length) {
+      var queued = this.root._mutatorEventQueue.shift();
+      type = queued[0];
+      segments = queued[1];
+      eventArgs = queued[2];
+      this._emit(type, segments, eventArgs);
+      this._emit('all', segments, [type].concat(eventArgs));
+    }
+    this.root._mutatorEventQueue = null;
+    return this;
   }
+  return this._emit.apply(this, arguments);
 };
 
 Model.prototype._on = EventEmitter.prototype.on;
@@ -12073,8 +10688,6 @@ Model.prototype.once = function(type, pattern, cb) {
 
 Model.prototype._removeAllListeners = EventEmitter.prototype.removeAllListeners;
 Model.prototype.removeAllListeners = function(type, subpattern) {
-  if (!this._events) return this;
-
   // If a pattern is specified without an event type, remove all model event
   // listeners under that pattern for all events
   if (!type) {
@@ -12105,6 +10718,7 @@ Model.prototype.removeAllListeners = function(type, subpattern) {
       this.removeListener(type, listener);
     }
   }
+  return this;
 };
 
 function patternContained(pattern, segments, listener) {
@@ -12148,25 +10762,50 @@ Model.prototype.silent = function(value) {
   return model;
 };
 
+Model.prototype.eventContext = function(value) {
+  var model = this._child();
+  model._eventContext = value;
+  return model;
+};
+
+Model.prototype.removeContextListeners = function(value) {
+  if (arguments.length === 0) {
+    value = this._eventContext;
+  }
+  // Remove all events created within a given context
+  for (var type in this._events) {
+    var listeners = this.listeners(type);
+    // Make sure to iterate in reverse, since the array might be
+    // mutated as listeners are removed
+    for (var i = listeners.length; i--;) {
+      var listener = listeners[i];
+      if (listener.eventContext === value) {
+        this.removeListener(type, listener);
+      }
+    }
+  }
+  return this;
+};
+
 function eventListener(model, subpattern, cb) {
   if (cb) {
     // For signatures:
     // model.on('change', 'example.subpath', callback)
     // model.at('example').on('change', 'subpath', callback)
     var pattern = model.path(subpattern);
-    return modelEventListener(pattern, cb);
+    return modelEventListener(pattern, cb, model._eventContext);
   }
   var path = model.path();
   cb = arguments[1];
   // For signature:
   // model.at('example').on('change', callback)
-  if (path) return modelEventListener(path, cb);
+  if (path) return modelEventListener(path, cb, model._eventContext);
   // For signature:
   // model.on('normalEvent', callback)
   return cb;
 }
 
-function modelEventListener(pattern, cb) {
+function modelEventListener(pattern, cb, eventContext) {
   var patternSegments = util.castSegments(pattern.split('.'));
   var testFn = testPatternFn(pattern, patternSegments);
 
@@ -12182,6 +10821,7 @@ function modelEventListener(pattern, cb) {
   // Used in Model#removeAllListeners
   modelListener.pattern = pattern;
   modelListener.patternSegments = patternSegments;
+  modelListener.eventContext = eventContext;
 
   return modelListener;
 }
@@ -12238,7 +10878,7 @@ function stripRestWildcard(segments) {
   return true;
 }
 
-},{"../util":56,"./Model":44,"events":11}],49:[function(require,module,exports){
+},{"../util":46,"./Model":34,"events":1}],39:[function(require,module,exports){
 var util = require('../util');
 var Model = require('./Model');
 var defaultFns = require('./defaultFns');
@@ -12302,6 +10942,9 @@ Model.prototype.sort = function() {
 
 Model.prototype.removeAllFilters = function(subpath) {
   var segments = this._splitPath(subpath);
+  this._removeAllFilters(segments);
+};
+Model.prototype._removeAllFilters = function(segments) {
   var filters = this.root._filters.fromMap;
   for (var from in filters) {
     if (util.contains(segments, filters[from].fromSegments)) {
@@ -12394,81 +11037,73 @@ Filter.prototype._slice = function(results) {
 };
 
 Filter.prototype.ids = function() {
-  try {
-    var items = this.model._get(this.inputSegments);
-    var ids = [];
-    if (!items) return ids;
-    if (Array.isArray(items)) {
-      if (this.filterFn) {
-        for (var i = 0; i < items.length; i++) {
-          if (this.filterFn.call(this.model, items[i], i, items)) {
-            ids.push(i);
-          }
+  var items = this.model._get(this.inputSegments);
+  var ids = [];
+  if (!items) return ids;
+  if (Array.isArray(items)) {
+    if (this.filterFn) {
+      for (var i = 0; i < items.length; i++) {
+        if (this.filterFn.call(this.model, items[i], i, items)) {
+          ids.push(i);
         }
-      } else {
-        for (var i = 0; i < items.length; i++) ids.push(i);
       }
     } else {
-      if (this.filterFn) {
-        for (var key in items) {
-          if (items.hasOwnProperty(key) &&
-            this.filterFn.call(this.model, items[key], key, items)
-          ) {
-            ids.push(key);
-          }
+      for (var i = 0; i < items.length; i++) ids.push(i);
+    }
+  } else {
+    if (this.filterFn) {
+      for (var key in items) {
+        if (items.hasOwnProperty(key) &&
+          this.filterFn.call(this.model, items[key], key, items)
+        ) {
+          ids.push(key);
         }
-      } else {
-        ids = Object.keys(items);
       }
+    } else {
+      ids = Object.keys(items);
     }
-    var sortFn = this.sortFn;
-    if (sortFn) {
-      ids.sort(function(a, b) {
-        return sortFn(items[a], items[b]);
-      });
-    }
-    return this._slice(ids);
-  } catch (err) {
-    this.model.emit('error', err);
   }
+  var sortFn = this.sortFn;
+  if (sortFn) {
+    ids.sort(function(a, b) {
+      return sortFn(items[a], items[b]);
+    });
+  }
+  return this._slice(ids);
 };
 
 Filter.prototype.get = function() {
-  try {
-    var items = this.model._get(this.inputSegments);
-    var results = [];
-    if (Array.isArray(items)) {
-      if (this.filterFn) {
-        for (var i = 0; i < items.length; i++) {
-          if (this.filterFn.call(this.model, items[i], i, items)) {
-            results.push(items[i]);
-          }
+  var items = this.model._get(this.inputSegments);
+  var results = [];
+  if (Array.isArray(items)) {
+    if (this.filterFn) {
+      for (var i = 0; i < items.length; i++) {
+        if (this.filterFn.call(this.model, items[i], i, items)) {
+          results.push(items[i]);
         }
-      } else {
-        results = items.slice();
       }
     } else {
-      if (this.filterFn) {
-        for (var key in items) {
-          if (items.hasOwnProperty(key) &&
-            this.filterFn.call(this.model, items[key], key, items)
-          ) {
-            results.push(items[key]);
-          }
+      results = items.slice();
+    }
+  } else {
+    if (this.filterFn) {
+      for (var key in items) {
+        if (items.hasOwnProperty(key) &&
+          this.filterFn.call(this.model, items[key], key, items)
+        ) {
+          results.push(items[key]);
         }
-      } else {
-        for (var key in items) {
-          if (items.hasOwnProperty(key)) {
-            results.push(items[key]);
-          }
+      }
+    } else {
+      for (var key in items) {
+        if (items.hasOwnProperty(key)) {
+          results.push(items[key]);
         }
       }
     }
-    if (this.sortFn) results.sort(this.sortFn);
-    return this._slice(results);
-  } catch (err) {
-    this.model.emit('error', err);
   }
+  if (this.sortFn) results.sort(this.sortFn);
+  return this._slice(results);
 };
 
 Filter.prototype.update = function(pass) {
@@ -12488,11 +11123,11 @@ Filter.prototype.ref = function(from) {
 
 Filter.prototype.destroy = function() {
   delete this.filters.fromMap[this.from];
-  this.model.removeRefList(this.from);
+  this.model._removeRef(this.idsSegments);
   this.model._del(this.idsSegments);
 };
 
-},{"../util":56,"./Model":44,"./defaultFns":47}],50:[function(require,module,exports){
+},{"../util":46,"./Model":34,"./defaultFns":37}],40:[function(require,module,exports){
 var util = require('../util');
 var Model = require('./Model');
 var defaultFns = require('./defaultFns');
@@ -12569,15 +11204,22 @@ Model.prototype.start = function() {
 
 Model.prototype.stop = function(subpath) {
   var path = this.path(subpath);
-  this.root._fns.stop(path);
+  this._stop(path);
+};
+Model.prototype._stop = function(fromPath) {
+  this.root._fns.stop(fromPath);
 };
 
 Model.prototype.stopAll = function(subpath) {
   var segments = this._splitPath(subpath);
+  this._stopAll(segments);
+};
+Model.prototype._stopAll = function(segments) {
   var fns = this.root._fns.fromMap;
   for (var from in fns) {
-    if (util.contains(segments, fns[from].fromSegments)) {
-      this.stop(from);
+    var fromSegments = fns[from].fromSegments;
+    if (util.contains(segments, fromSegments)) {
+      this._stop(from);
     }
   }
 };
@@ -12629,8 +11271,7 @@ function Fn(model, name, from, inputPaths, fns, options) {
   this.inputPaths = inputPaths;
   this.options = options;
   if (!fns) {
-    var err = new TypeError('Model function not found: ' + name);
-    model.emit('error', err);
+    throw new TypeError('Model function not found: ' + name);
   }
   this.getFn = fns.get || fns;
   this.setFn = fns.set;
@@ -12640,15 +11281,14 @@ function Fn(model, name, from, inputPaths, fns, options) {
     var segments = this.inputPaths[i].split('.');
     this.inputsSegments.push(segments);
   }
+
+  // Copy can be 'output', 'input', 'both', or 'none'
   var copy = (options && options.copy) || 'output';
   this.copyInput = (copy === 'input' || copy === 'both');
   this.copyOutput = (copy === 'output' || copy === 'both');
 
-  var equal = (options && options.equal === 'strict') ? util.equal : util.deepEqual;
-  this.diffOptions = {equal: equal};
-
-  // Mode can be 'array', 'diff', or 'set'
-  this.mode = (options && options.mode) || 'diff';
+  // Mode can be 'diffDeep', 'diff', 'arrayDeep', 'array', or 'set'
+  this.mode = (options && options.mode) || 'diffDeep';
 }
 
 Fn.prototype.apply = function(fn, inputs) {
@@ -12656,11 +11296,7 @@ Fn.prototype.apply = function(fn, inputs) {
     var input = this.model._get(this.inputsSegments[i]);
     inputs.push(this.copyInput ? util.deepCopy(input) : input);
   }
-  try {
-    return fn.apply(this.model, inputs);
-  } catch (err) {
-    this.model.emit('error', err);
-  }
+  return fn.apply(this.model, inputs);
 };
 
 Fn.prototype.get = function() {
@@ -12691,16 +11327,20 @@ Fn.prototype.onOutput = function(pass) {
 };
 
 Fn.prototype._setValue = function(model, segments, value) {
-  if (this.mode === 'set') {
-    model._set(segments, value);
+  if (this.mode === 'diffDeep') {
+    model._setDiffDeep(segments, value);
+  } else if (this.mode === 'diff') {
+    model._setDiff(segments, value);
+  } else if (this.mode === 'arrayDeep') {
+    model._setArrayDiffDeep(segments, value);
   } else if (this.mode === 'array') {
     model._setArrayDiff(segments, value);
   } else {
-    model._setDiff(segments, value, this.diffOptions);
+    model._set(segments, value);
   }
 };
 
-},{"../util":56,"./Model":44,"./defaultFns":47}],51:[function(require,module,exports){
+},{"../util":46,"./Model":34,"./defaultFns":37}],41:[function(require,module,exports){
 var util = require('../util');
 var Model = require('./Model');
 
@@ -12738,6 +11378,9 @@ Model.prototype._set = function(segments, value, cb) {
   var model = this;
   function set(doc, docSegments, fnCb) {
     var previous = doc.set(docSegments, value, fnCb);
+    // On setting the entire doc, remote docs sometimes do a copy to add the
+    // id without it being stored in the database by ShareJS
+    if (docSegments.length === 0) value = doc.get(docSegments);
     model.emit('change', segments, [value, previous, model._pass]);
     return previous;
   }
@@ -12964,7 +11607,7 @@ Model.prototype._unshift = function(segments, value, cb) {
 Model.prototype.insert = function() {
   var subpath, index, values, cb;
   if (arguments.length === 1) {
-    this.emit('error', new Error('Not enough arguments for insert'));
+    throw new Error('Not enough arguments for insert');
   } else if (arguments.length === 2) {
     index = arguments[0];
     values = arguments[1];
@@ -13122,7 +11765,7 @@ Model.prototype._remove = function(segments, index, howMany, cb) {
 Model.prototype.move = function() {
   var subpath, from, to, howMany, cb;
   if (arguments.length === 1) {
-    this.emit('error', new Error('Not enough arguments for move'));
+    throw new Error('Not enough arguments for move');
   } else if (arguments.length === 2) {
     from = arguments[0];
     to = arguments[1];
@@ -13193,7 +11836,7 @@ Model.prototype._move = function(segments, from, to, howMany, cb) {
 Model.prototype.stringInsert = function() {
   var subpath, index, text, cb;
   if (arguments.length === 1) {
-    this.emit('error', new Error('Not enough arguments for stringInsert'));
+    throw new Error('Not enough arguments for stringInsert');
   } else if (arguments.length === 2) {
     index = arguments[0];
     text = arguments[1];
@@ -13232,7 +11875,7 @@ Model.prototype._stringInsert = function(segments, index, text, cb) {
 Model.prototype.stringRemove = function() {
   var subpath, index, howMany, cb;
   if (arguments.length === 1) {
-    this.emit('error', new Error('Not enough arguments for stringRemove'));
+    throw new Error('Not enough arguments for stringRemove');
   } else if (arguments.length === 2) {
     index = arguments[0];
     howMany = arguments[1];
@@ -13268,7 +11911,7 @@ Model.prototype._stringRemove = function(segments, index, howMany, cb) {
   return this._mutate(segments, stringRemove, cb);
 };
 
-},{"../util":56,"./Model":44}],52:[function(require,module,exports){
+},{"../util":46,"./Model":34}],42:[function(require,module,exports){
 var Model = require('./Model');
 
 exports.mixin = {};
@@ -13350,7 +11993,7 @@ Model.prototype.leaf = function(path) {
   return path.slice(i + 1);
 };
 
-},{"./Model":44}],53:[function(require,module,exports){
+},{"./Model":34}],43:[function(require,module,exports){
 var util = require('../util');
 var Model = require('./Model');
 
@@ -13420,8 +12063,18 @@ function addIndexListeners(model) {
   }
 }
 
-function refChange(model, dereferenced, eventArgs) {
+function refChange(model, dereferenced, eventArgs, segments) {
   var value = eventArgs[0];
+  // Detect if we are deleting vs. setting to undefined
+  if (value === void 0) {
+    var parentSegments = segments.slice();
+    var last = parentSegments.pop();
+    var parent = model._get(parentSegments);
+    if (!parent || !(last in parent)) {
+      model._del(dereferenced);
+      return;
+    }
+  }
   model._set(dereferenced, value);
 }
 function refLoad(model, dereferenced, eventArgs) {
@@ -13486,7 +12139,7 @@ function addListener(model, type, fn) {
         } else {
           var setterModel = ref.model.pass(pass, true);
           setterModel._dereference = noopDereference;
-          fn(setterModel, dereferenced, eventArgs);
+          fn(setterModel, dereferenced, eventArgs, segments);
         }
       }
     }
@@ -13535,9 +12188,8 @@ Model.prototype.ref = function() {
   if (!toPath) return to.ref(fromPath);
   var fromSegments = fromPath.split('.');
   if (fromSegments.length < 2) {
-    var message = 'ref must be performed under a collection ' +
-      'and document id. Invalid path: ' + fromPath;
-    this.emit('error', new Error(message));
+    throw new Error('ref must be performed under a collection ' +
+      'and document id. Invalid path: ' + fromPath);
   }
   this.root._refs.remove(fromPath);
   var value = this.get(to);
@@ -13546,24 +12198,30 @@ Model.prototype.ref = function() {
   return this.scope(fromPath);
 };
 
-Model.prototype.removeRef = function(from) {
-  var fromPath = this.path(from);
+Model.prototype.removeRef = function(subpath) {
+  var segments = this._splitPath(subpath);
+  var fromPath = segments.join('.');
+  this._removeRef(segments, fromPath);
+};
+Model.prototype._removeRef = function(segments, fromPath) {
   this.root._refs.remove(fromPath);
-  this.del(from);
+  this.root._refLists.remove(fromPath);
+  this._del(segments);
 };
 
 Model.prototype.removeAllRefs = function(subpath) {
   var segments = this._splitPath(subpath);
-  var refs = this.root._refs.fromMap;
-  var refLists = this.root._refLists.fromMap;
-  for (var from in refs) {
-    if (util.contains(segments, refs[from].fromSegments)) {
-      this.removeRef(from);
-    }
-  }
-  for (var from in refLists) {
-    if (util.contains(segments, refLists[from].fromSegments)) {
-      this.removeRefList(from);
+  this._removeAllRefs(segments);
+};
+Model.prototype._removeAllRefs = function(segments) {
+  this._removeMapRefs(segments, this.root._refs.fromMap);
+  this._removeMapRefs(segments, this.root._refLists.fromMap);
+};
+Model.prototype._removeMapRefs = function(segments, map) {
+  for (var from in map) {
+    var fromSegments = map[from].fromSegments;
+    if (util.contains(segments, fromSegments)) {
+      this._removeRef(fromSegments, from);
     }
   }
 };
@@ -13684,7 +12342,7 @@ function listMapRemove(map, name, item) {
   if (!items.length) delete map[name];
 }
 
-},{"../util":56,"./Model":44}],54:[function(require,module,exports){
+},{"../util":46,"./Model":34}],44:[function(require,module,exports){
 var util = require('../util');
 var Model = require('./Model');
 
@@ -13783,9 +12441,8 @@ function patchFromEvent(type, segments, eventArgs, refList) {
 
   // Mutation underneath a child of the `from` object.
   if (segmentsLength > fromLength + 1) {
-    var message = 'Mutation on descendant of refList `from` should have been dereferenced: ' + segments.join('.');
-    model.emit('error', new Error(message));
-    return;
+    throw new Error('Mutation on descendant of refList `from`' +
+      ' should have been dereferenced: ' + segments.join('.'));
   }
 
   // Otherwise, mutation of a child of the `from` object
@@ -13813,9 +12470,8 @@ function patchFromEvent(type, segments, eventArgs, refList) {
     return;
   }
   if (type === 'insert' || type === 'remove' || type === 'move') {
-    var message = 'Array mutation on child of refList `from` should have been dereferenced: ' + segments.join('.');
-    model.emit('error', new Error(message));
-    return;
+    throw new Error('Array mutation on child of refList `from`' +
+      'should have been dereferenced: ' + segments.join('.'));
   }
 }
 
@@ -13835,8 +12491,7 @@ function setNewToValues(model, refList, values, fn) {
     }
     var toSegments = refList.toSegmentsByItem(value);
     if (id === void 0 || toSegments === void 0) {
-      var message = 'Unable to add item to refList: ' + value;
-      return model.emit('error', new Error(message));
+      throw new Error('Unable to add item to refList: ' + value);
     }
     if (model._get(toSegments) !== value) {
       model._set(toSegments, value);
@@ -14094,12 +12749,6 @@ Model.prototype.refList = function() {
   return this.scope(fromPath);
 };
 
-Model.prototype.removeRefList = function(from) {
-  var fromPath = this.path(from);
-  var refList = this.root._refLists.remove(fromPath);
-  if (refList) this._del(refList.fromSegments);
-};
-
 function RefList(model, from, to, ids, options) {
   this.model = model && model.pass({$refList: this});
   this.from = from;
@@ -14215,7 +12864,7 @@ RefLists.prototype.toJSON = function() {
   return out;
 };
 
-},{"../util":56,"./Model":44}],55:[function(require,module,exports){
+},{"../util":46,"./Model":34}],45:[function(require,module,exports){
 var util = require('../util');
 var Model = require('./Model');
 var arrayDiff = require('arraydiff');
@@ -14424,15 +13073,12 @@ Model.prototype._applyArrayDiff = function(segments, diff, cb) {
   return this._mutate(segments, applyArrayDiff, cb);
 };
 
-},{"../util":56,"./Model":44,"arraydiff":57}],56:[function(require,module,exports){
+},{"../util":46,"./Model":34,"arraydiff":47}],46:[function(require,module,exports){
 (function (process){
 var deepIs = require('deep-is');
 
 var isServer = process.title !== 'browser';
-var isProduction = process.env.NODE_ENV === 'production';
-
 exports.isServer = isServer;
-exports.isProduction = isProduction;
 
 exports.asyncGroup = asyncGroup;
 exports.castSegments = castSegments;
@@ -14449,6 +13095,7 @@ exports.mergeInto = mergeInto;
 exports.mayImpact = mayImpact;
 exports.mayImpactAny = mayImpactAny;
 exports.serverRequire = serverRequire;
+exports.serverUse = serverUse;
 exports.use = use;
 
 function asyncGroup(cb) {
@@ -14588,20 +13235,18 @@ function mergeInto(to, from) {
   return to;
 }
 
-function serverRequire(name) {
+function serverRequire(module, id) {
   if (!isServer) return;
-  // Tricks Browserify into not logging a warning
-  var _require = require;
-  return _require(name);
+  return module.require(id);
+}
+
+function serverUse(module, id, options) {
+  if (!isServer) return this;
+  var plugin = module.require(id);
+  return this.use(plugin, options);
 }
 
 function use(plugin, options) {
-  // Server-side plugins may be included via filename
-  if (typeof plugin === 'string') {
-    if (!isServer) return this;
-    plugin = serverRequire(plugin);
-  }
-
   // Don't include a plugin more than once
   var plugins = this._plugins || (this._plugins = []);
   if (plugins.indexOf(plugin) === -1) {
@@ -14611,8 +13256,8 @@ function use(plugin, options) {
   return this;
 }
 
-}).call(this,require("/Users/enjamini/code/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js"))
-},{"/Users/enjamini/code/codeparty/derby-standalone/node_modules/browserify/node_modules/insert-module-globals/node_modules/process/browser.js":12,"deep-is":58}],57:[function(require,module,exports){
+}).call(this,require('_process'))
+},{"_process":3,"deep-is":48}],47:[function(require,module,exports){
 module.exports = arrayDiff;
 
 // Based on some rough benchmarking, this algorithm is about O(2n) worst case,
@@ -14795,7 +13440,7 @@ function arrayDiff(before, after, equalFn) {
   return removes.concat(outputMoves, inserts);
 }
 
-},{}],58:[function(require,module,exports){
+},{}],48:[function(require,module,exports){
 var pSlice = Array.prototype.slice;
 var Object_keys = typeof Object.keys === 'function'
     ? Object.keys
@@ -14899,256 +13544,227 @@ function objEquiv(a, b) {
   return true;
 }
 
-},{}],59:[function(require,module,exports){
-(function (Buffer){
+},{}],49:[function(require,module,exports){
+(function (global){
+
+var rng;
+
+if (global.crypto && crypto.getRandomValues) {
+  // WHATWG crypto-based RNG - http://wiki.whatwg.org/wiki/Crypto
+  // Moderately fast, high quality
+  var _rnds8 = new Uint8Array(16);
+  rng = function whatwgRNG() {
+    crypto.getRandomValues(_rnds8);
+    return _rnds8;
+  };
+}
+
+if (!rng) {
+  // Math.random()-based (RNG)
+  //
+  // If all else fails, use Math.random().  It's fast, but is of unspecified
+  // quality.
+  var  _rnds = new Array(16);
+  rng = function() {
+    for (var i = 0, r; i < 16; i++) {
+      if ((i & 0x03) === 0) r = Math.random() * 0x100000000;
+      _rnds[i] = r >>> ((i & 0x03) << 3) & 0xff;
+    }
+
+    return _rnds;
+  };
+}
+
+module.exports = rng;
+
+
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{}],50:[function(require,module,exports){
 //     uuid.js
 //
 //     Copyright (c) 2010-2012 Robert Kieffer
 //     MIT License - http://opensource.org/licenses/mit-license.php
 
-(function() {
-  var _global = this;
+// Unique ID creation requires a high quality random # generator.  We feature
+// detect to determine the best RNG source, normalizing to a function that
+// returns 128-bits of randomness, since that's what's usually required
+var _rng = require('./rng');
 
-  // Unique ID creation requires a high quality random # generator.  We feature
-  // detect to determine the best RNG source, normalizing to a function that
-  // returns 128-bits of randomness, since that's what's usually required
-  var _rng;
+// Maps for number <-> hex string conversion
+var _byteToHex = [];
+var _hexToByte = {};
+for (var i = 0; i < 256; i++) {
+  _byteToHex[i] = (i + 0x100).toString(16).substr(1);
+  _hexToByte[_byteToHex[i]] = i;
+}
 
-  // Node.js crypto-based RNG - http://nodejs.org/docs/v0.6.2/api/crypto.html
-  //
-  // Moderately fast, high quality
-  if (typeof(require) == 'function') {
-    try {
-      var _rb = require('crypto').randomBytes;
-      _rng = _rb && function() {return _rb(16);};
-    } catch(e) {}
-  }
+// **`parse()` - Parse a UUID into it's component bytes**
+function parse(s, buf, offset) {
+  var i = (buf && offset) || 0, ii = 0;
 
-  if (!_rng && _global.crypto && crypto.getRandomValues) {
-    // WHATWG crypto-based RNG - http://wiki.whatwg.org/wiki/Crypto
-    //
-    // Moderately fast, high quality
-    var _rnds8 = new Uint8Array(16);
-    _rng = function whatwgRNG() {
-      crypto.getRandomValues(_rnds8);
-      return _rnds8;
-    };
-  }
-
-  if (!_rng) {
-    // Math.random()-based (RNG)
-    //
-    // If all else fails, use Math.random().  It's fast, but is of unspecified
-    // quality.
-    var  _rnds = new Array(16);
-    _rng = function() {
-      for (var i = 0, r; i < 16; i++) {
-        if ((i & 0x03) === 0) r = Math.random() * 0x100000000;
-        _rnds[i] = r >>> ((i & 0x03) << 3) & 0xff;
-      }
-
-      return _rnds;
-    };
-  }
-
-  // Buffer class to use
-  var BufferClass = typeof(Buffer) == 'function' ? Buffer : Array;
-
-  // Maps for number <-> hex string conversion
-  var _byteToHex = [];
-  var _hexToByte = {};
-  for (var i = 0; i < 256; i++) {
-    _byteToHex[i] = (i + 0x100).toString(16).substr(1);
-    _hexToByte[_byteToHex[i]] = i;
-  }
-
-  // **`parse()` - Parse a UUID into it's component bytes**
-  function parse(s, buf, offset) {
-    var i = (buf && offset) || 0, ii = 0;
-
-    buf = buf || [];
-    s.toLowerCase().replace(/[0-9a-f]{2}/g, function(oct) {
-      if (ii < 16) { // Don't overflow!
-        buf[i + ii++] = _hexToByte[oct];
-      }
-    });
-
-    // Zero out remaining bytes if string was short
-    while (ii < 16) {
-      buf[i + ii++] = 0;
+  buf = buf || [];
+  s.toLowerCase().replace(/[0-9a-f]{2}/g, function(oct) {
+    if (ii < 16) { // Don't overflow!
+      buf[i + ii++] = _hexToByte[oct];
     }
+  });
 
-    return buf;
+  // Zero out remaining bytes if string was short
+  while (ii < 16) {
+    buf[i + ii++] = 0;
   }
 
-  // **`unparse()` - Convert UUID byte array (ala parse()) into a string**
-  function unparse(buf, offset) {
-    var i = offset || 0, bth = _byteToHex;
-    return  bth[buf[i++]] + bth[buf[i++]] +
-            bth[buf[i++]] + bth[buf[i++]] + '-' +
-            bth[buf[i++]] + bth[buf[i++]] + '-' +
-            bth[buf[i++]] + bth[buf[i++]] + '-' +
-            bth[buf[i++]] + bth[buf[i++]] + '-' +
-            bth[buf[i++]] + bth[buf[i++]] +
-            bth[buf[i++]] + bth[buf[i++]] +
-            bth[buf[i++]] + bth[buf[i++]];
+  return buf;
+}
+
+// **`unparse()` - Convert UUID byte array (ala parse()) into a string**
+function unparse(buf, offset) {
+  var i = offset || 0, bth = _byteToHex;
+  return  bth[buf[i++]] + bth[buf[i++]] +
+          bth[buf[i++]] + bth[buf[i++]] + '-' +
+          bth[buf[i++]] + bth[buf[i++]] + '-' +
+          bth[buf[i++]] + bth[buf[i++]] + '-' +
+          bth[buf[i++]] + bth[buf[i++]] + '-' +
+          bth[buf[i++]] + bth[buf[i++]] +
+          bth[buf[i++]] + bth[buf[i++]] +
+          bth[buf[i++]] + bth[buf[i++]];
+}
+
+// **`v1()` - Generate time-based UUID**
+//
+// Inspired by https://github.com/LiosK/UUID.js
+// and http://docs.python.org/library/uuid.html
+
+// random #'s we need to init node and clockseq
+var _seedBytes = _rng();
+
+// Per 4.5, create and 48-bit node id, (47 random bits + multicast bit = 1)
+var _nodeId = [
+  _seedBytes[0] | 0x01,
+  _seedBytes[1], _seedBytes[2], _seedBytes[3], _seedBytes[4], _seedBytes[5]
+];
+
+// Per 4.2.2, randomize (14 bit) clockseq
+var _clockseq = (_seedBytes[6] << 8 | _seedBytes[7]) & 0x3fff;
+
+// Previous uuid creation time
+var _lastMSecs = 0, _lastNSecs = 0;
+
+// See https://github.com/broofa/node-uuid for API details
+function v1(options, buf, offset) {
+  var i = buf && offset || 0;
+  var b = buf || [];
+
+  options = options || {};
+
+  var clockseq = options.clockseq !== undefined ? options.clockseq : _clockseq;
+
+  // UUID timestamps are 100 nano-second units since the Gregorian epoch,
+  // (1582-10-15 00:00).  JSNumbers aren't precise enough for this, so
+  // time is handled internally as 'msecs' (integer milliseconds) and 'nsecs'
+  // (100-nanoseconds offset from msecs) since unix epoch, 1970-01-01 00:00.
+  var msecs = options.msecs !== undefined ? options.msecs : new Date().getTime();
+
+  // Per 4.2.1.2, use count of uuid's generated during the current clock
+  // cycle to simulate higher resolution clock
+  var nsecs = options.nsecs !== undefined ? options.nsecs : _lastNSecs + 1;
+
+  // Time since last uuid creation (in msecs)
+  var dt = (msecs - _lastMSecs) + (nsecs - _lastNSecs)/10000;
+
+  // Per 4.2.1.2, Bump clockseq on clock regression
+  if (dt < 0 && options.clockseq === undefined) {
+    clockseq = clockseq + 1 & 0x3fff;
   }
 
-  // **`v1()` - Generate time-based UUID**
-  //
-  // Inspired by https://github.com/LiosK/UUID.js
-  // and http://docs.python.org/library/uuid.html
-
-  // random #'s we need to init node and clockseq
-  var _seedBytes = _rng();
-
-  // Per 4.5, create and 48-bit node id, (47 random bits + multicast bit = 1)
-  var _nodeId = [
-    _seedBytes[0] | 0x01,
-    _seedBytes[1], _seedBytes[2], _seedBytes[3], _seedBytes[4], _seedBytes[5]
-  ];
-
-  // Per 4.2.2, randomize (14 bit) clockseq
-  var _clockseq = (_seedBytes[6] << 8 | _seedBytes[7]) & 0x3fff;
-
-  // Previous uuid creation time
-  var _lastMSecs = 0, _lastNSecs = 0;
-
-  // See https://github.com/broofa/node-uuid for API details
-  function v1(options, buf, offset) {
-    var i = buf && offset || 0;
-    var b = buf || [];
-
-    options = options || {};
-
-    var clockseq = options.clockseq != null ? options.clockseq : _clockseq;
-
-    // UUID timestamps are 100 nano-second units since the Gregorian epoch,
-    // (1582-10-15 00:00).  JSNumbers aren't precise enough for this, so
-    // time is handled internally as 'msecs' (integer milliseconds) and 'nsecs'
-    // (100-nanoseconds offset from msecs) since unix epoch, 1970-01-01 00:00.
-    var msecs = options.msecs != null ? options.msecs : new Date().getTime();
-
-    // Per 4.2.1.2, use count of uuid's generated during the current clock
-    // cycle to simulate higher resolution clock
-    var nsecs = options.nsecs != null ? options.nsecs : _lastNSecs + 1;
-
-    // Time since last uuid creation (in msecs)
-    var dt = (msecs - _lastMSecs) + (nsecs - _lastNSecs)/10000;
-
-    // Per 4.2.1.2, Bump clockseq on clock regression
-    if (dt < 0 && options.clockseq == null) {
-      clockseq = clockseq + 1 & 0x3fff;
-    }
-
-    // Reset nsecs if clock regresses (new clockseq) or we've moved onto a new
-    // time interval
-    if ((dt < 0 || msecs > _lastMSecs) && options.nsecs == null) {
-      nsecs = 0;
-    }
-
-    // Per 4.2.1.2 Throw error if too many uuids are requested
-    if (nsecs >= 10000) {
-      throw new Error('uuid.v1(): Can\'t create more than 10M uuids/sec');
-    }
-
-    _lastMSecs = msecs;
-    _lastNSecs = nsecs;
-    _clockseq = clockseq;
-
-    // Per 4.1.4 - Convert from unix epoch to Gregorian epoch
-    msecs += 12219292800000;
-
-    // `time_low`
-    var tl = ((msecs & 0xfffffff) * 10000 + nsecs) % 0x100000000;
-    b[i++] = tl >>> 24 & 0xff;
-    b[i++] = tl >>> 16 & 0xff;
-    b[i++] = tl >>> 8 & 0xff;
-    b[i++] = tl & 0xff;
-
-    // `time_mid`
-    var tmh = (msecs / 0x100000000 * 10000) & 0xfffffff;
-    b[i++] = tmh >>> 8 & 0xff;
-    b[i++] = tmh & 0xff;
-
-    // `time_high_and_version`
-    b[i++] = tmh >>> 24 & 0xf | 0x10; // include version
-    b[i++] = tmh >>> 16 & 0xff;
-
-    // `clock_seq_hi_and_reserved` (Per 4.2.2 - include variant)
-    b[i++] = clockseq >>> 8 | 0x80;
-
-    // `clock_seq_low`
-    b[i++] = clockseq & 0xff;
-
-    // `node`
-    var node = options.node || _nodeId;
-    for (var n = 0; n < 6; n++) {
-      b[i + n] = node[n];
-    }
-
-    return buf ? buf : unparse(b);
+  // Reset nsecs if clock regresses (new clockseq) or we've moved onto a new
+  // time interval
+  if ((dt < 0 || msecs > _lastMSecs) && options.nsecs === undefined) {
+    nsecs = 0;
   }
 
-  // **`v4()` - Generate random UUID**
-
-  // See https://github.com/broofa/node-uuid for API details
-  function v4(options, buf, offset) {
-    // Deprecated - 'format' argument, as supported in v1.2
-    var i = buf && offset || 0;
-
-    if (typeof(options) == 'string') {
-      buf = options == 'binary' ? new BufferClass(16) : null;
-      options = null;
-    }
-    options = options || {};
-
-    var rnds = options.random || (options.rng || _rng)();
-
-    // Per 4.4, set bits for version and `clock_seq_hi_and_reserved`
-    rnds[6] = (rnds[6] & 0x0f) | 0x40;
-    rnds[8] = (rnds[8] & 0x3f) | 0x80;
-
-    // Copy bytes to buffer, if provided
-    if (buf) {
-      for (var ii = 0; ii < 16; ii++) {
-        buf[i + ii] = rnds[ii];
-      }
-    }
-
-    return buf || unparse(rnds);
+  // Per 4.2.1.2 Throw error if too many uuids are requested
+  if (nsecs >= 10000) {
+    throw new Error('uuid.v1(): Can\'t create more than 10M uuids/sec');
   }
 
-  // Export public API
-  var uuid = v4;
-  uuid.v1 = v1;
-  uuid.v4 = v4;
-  uuid.parse = parse;
-  uuid.unparse = unparse;
-  uuid.BufferClass = BufferClass;
+  _lastMSecs = msecs;
+  _lastNSecs = nsecs;
+  _clockseq = clockseq;
 
-  if (typeof define === 'function' && define.amd) {
-    // Publish as AMD module
-    define(function() {return uuid;});
-  } else if (typeof(module) != 'undefined' && module.exports) {
-    // Publish as node.js module
-    module.exports = uuid;
-  } else {
-    // Publish as global (in browsers)
-    var _previousRoot = _global.uuid;
+  // Per 4.1.4 - Convert from unix epoch to Gregorian epoch
+  msecs += 12219292800000;
 
-    // **`noConflict()` - (browser only) to reset global 'uuid' var**
-    uuid.noConflict = function() {
-      _global.uuid = _previousRoot;
-      return uuid;
-    };
+  // `time_low`
+  var tl = ((msecs & 0xfffffff) * 10000 + nsecs) % 0x100000000;
+  b[i++] = tl >>> 24 & 0xff;
+  b[i++] = tl >>> 16 & 0xff;
+  b[i++] = tl >>> 8 & 0xff;
+  b[i++] = tl & 0xff;
 
-    _global.uuid = uuid;
+  // `time_mid`
+  var tmh = (msecs / 0x100000000 * 10000) & 0xfffffff;
+  b[i++] = tmh >>> 8 & 0xff;
+  b[i++] = tmh & 0xff;
+
+  // `time_high_and_version`
+  b[i++] = tmh >>> 24 & 0xf | 0x10; // include version
+  b[i++] = tmh >>> 16 & 0xff;
+
+  // `clock_seq_hi_and_reserved` (Per 4.2.2 - include variant)
+  b[i++] = clockseq >>> 8 | 0x80;
+
+  // `clock_seq_low`
+  b[i++] = clockseq & 0xff;
+
+  // `node`
+  var node = options.node || _nodeId;
+  for (var n = 0; n < 6; n++) {
+    b[i + n] = node[n];
   }
-}).call(this);
 
-}).call(this,require("buffer").Buffer)
-},{"buffer":2,"crypto":6}],60:[function(require,module,exports){
+  return buf ? buf : unparse(b);
+}
+
+// **`v4()` - Generate random UUID**
+
+// See https://github.com/broofa/node-uuid for API details
+function v4(options, buf, offset) {
+  // Deprecated - 'format' argument, as supported in v1.2
+  var i = buf && offset || 0;
+
+  if (typeof(options) == 'string') {
+    buf = options == 'binary' ? new Array(16) : null;
+    options = null;
+  }
+  options = options || {};
+
+  var rnds = options.random || (options.rng || _rng)();
+
+  // Per 4.4, set bits for version and `clock_seq_hi_and_reserved`
+  rnds[6] = (rnds[6] & 0x0f) | 0x40;
+  rnds[8] = (rnds[8] & 0x3f) | 0x80;
+
+  // Copy bytes to buffer, if provided
+  if (buf) {
+    for (var ii = 0; ii < 16; ii++) {
+      buf[i + ii] = rnds[ii];
+    }
+  }
+
+  return buf || unparse(rnds);
+}
+
+// Export public API
+var uuid = v4;
+uuid.v1 = v1;
+uuid.v4 = v4;
+uuid.parse = parse;
+uuid.unparse = unparse;
+
+module.exports = uuid;
+
+},{"./rng":49}],51:[function(require,module,exports){
 var qs = require('qs')
 var parseUrl = require('url').parse
 var resolveUrl = require('url').resolve
@@ -15180,9 +13796,6 @@ function History(app, routes) {
   this.replace = function(url) {
     window.location.replace(url)
   }
-  this.refresh = function() {
-    window.location.reload()
-  }
 }
 
 History.prototype.push = function(url, render, state, e) {
@@ -15196,7 +13809,8 @@ History.prototype.replace = function(url, render, state, e) {
 // Rerender the current url locally
 History.prototype.refresh = function() {
   var path = routePath(window.location.href)
-  router.render(this, {url: path, previous: path, method: 'get'})
+  // Note that we don't pass previous to avoid triggering transitions
+  router.render(this, {url: path, method: 'get'})
 }
 
 History.prototype.back = function() {
@@ -15349,6 +13963,9 @@ function addListeners(history) {
   }
 
   function onPopState(e) {
+    // HACK: Chrome sometimes does a pop state before the app is set up properly
+    if (!history.app.page) return
+
     var previous = currentPath
     var state = e.state
     currentPath = window.location.pathname + window.location.search
@@ -15382,16 +13999,15 @@ function addListeners(history) {
     }
   }
 
-  document.addEventListener('click', onClick, false)
+  document.addEventListener('click', onClick, true)
   document.addEventListener('submit', onSubmit, false)
-  window.addEventListener('popstate', onPopState, false)
+  window.addEventListener('popstate', onPopState, true)
 }
 
-},{"./router":63,"qs":64,"url":18}],61:[function(require,module,exports){
+},{"./router":53,"qs":54,"url":8}],52:[function(require,module,exports){
 var Route = require('../vendor/express/router/route')
 var History = require('./History')
 var router = module.exports = require('./router')
-var compose = require('./compose')
 
 router.setup = setup
 
@@ -15399,16 +14015,13 @@ function setup(app) {
   var routes = {
     queue: {}
   , transitional: {}
-  , onRoute: function(callback, page, params, next, isTransitional, done) {
-      return app.onRoute(callback, page, params, next, isTransitional, done)
-    }
+  , app: app
   }
   app.history = new History(app, routes)
 
   ;['get', 'post', 'put', 'del', 'enter', 'exit'].forEach(function(method) {
     var queue = routes.queue[method] = []
     var transitional = routes.transitional[method] = []
-    var transitionalCalls = []
 
     app[method] = function(pattern, callback) {
       if (Array.isArray(pattern)) {
@@ -15423,12 +14036,6 @@ function setup(app) {
         var to = pattern.to
         var forward = pattern.forward || (callback && callback.forward) || callback
         var back = pattern.back || (callback && callback.back)
-        transitionalCalls.push({
-          from: from
-        , to: to
-        , forward: forward
-        , back: back
-        })
 
         var fromRoute = new Route(method, from, back)
         var toRoute = new Route(method, to, forward)
@@ -15443,7 +14050,6 @@ function setup(app) {
         , to: fromRoute
         })
 
-        compose.transition(app[method], transitionalCalls, from, to, forward, back)
         return app
       }
 
@@ -15453,104 +14059,7 @@ function setup(app) {
   })
 }
 
-},{"../vendor/express/router/route":65,"./History":60,"./compose":62,"./router":63}],62:[function(require,module,exports){
-var router = module.exports = require('./router')
-
-module.exports = {
-  transition: transition
-}
-
-/**
- * @param {Function} add (e.g., app.get, app.post, etc.)
- * @param {Array} transitionCalls is an array of objects that look 
- *   like {from, to, forward, back}
- * @param {String} from
- * @param {String} to
- * @param {Function} forward
- * @param {Function} back
- */
-function transition(add, calls, from, to, forward, back) {
-  if (from === to) return
-  for (var i = 0, len = calls.length; i < len; i++) {
-    var call = calls[i]
-    if (call.from === to) {
-      if (hasTransition(calls, from, call.to)) continue
-      var composedForward = composeCallbacks(forward, call.forward, to)
-      if (back && call.back) {
-        var composedBack = composeCallbacks(call.back, back, to)
-      }
-      add({
-        from: from
-      , to: call.to
-      , forward: composedForward
-      , back: composedBack
-      })
-    } else if (call.to === from) {
-      if (hasTransition(calls, call.from, to)) continue
-      var composedForward = composeCallbacks(call.forward, forward, from)
-      if (back && call.back) {
-        var composedBack = composeCallbacks(back, call.back, from)
-      }
-      add({
-        from: call.from
-      , to: to
-      , forward: composedForward
-      , back: composedBack
-      })
-    }
-  }
-}
-
-function hasTransition(calls, from, to) {
-  for (var i = calls.length; i--;) {
-    var call = calls[i];
-    if (call.from === from && call.to === to) return true
-  }
-  return false
-}
-
-// TODO: Async support
-function composeCallbacks(first, second, intermediatePath) {
-  function composed(self, model, params, next, done) {
-    var intermediateUrl = router.mapRoute(intermediatePath, params)
-    var url = params.url
-    var skipped = false
-    function wrapNext(err) {
-      skipped = true
-      next(err)
-    }
-    params.url = intermediateUrl
-    if (first.length === 4) {
-      first.call(self, model, params, wrapNext, doneFirst)
-    } else {
-      first.call(self, model, params, wrapNext)
-      doneFirst()
-    }
-    function doneFirst() {
-      if (skipped) return
-      params.previous = intermediateUrl
-      params.url = url
-      if (second.length === 4) {
-        second.call(self, model, params, next, done)
-      } else {
-        second.call(self, model, params, next)
-        done && done()
-      }
-    }
-  }
-  // These need to be defined individually, since their
-  // argument length will be checked
-  function asyncComposedCallback(model, params, next, done) {
-    composed(this, model, params, next, done);
-  }
-  function composedCallback(model, params, next) {
-    composed(this, model, params, next);
-  }
-  return (first.length === 4 || second.length === 4) ?
-    asyncComposedCallback : composedCallback;
-}
-
-},{"./router":63}],63:[function(require,module,exports){
+},{"../vendor/express/router/route":55,"./History":51,"./router":53}],53:[function(require,module,exports){
 var qs = require('qs')
 var nodeUrl = require('url');
 
@@ -15584,10 +14093,8 @@ function render(history, options, e) {
   req.routeTransitional(0, function() {
     req.page = history.page()
     req.routeQueue(0, function() {
-      req.routeAndTransition(0, function() {
-        // Cancel rendering by this app if no routes match
-        req.cancel()
-      })
+      // Cancel rendering by this app if no routes match
+      req.cancel()
     })
   })
 }
@@ -15601,11 +14108,10 @@ function RenderReq(page, routes, options, e) {
   this.query = queryString ? qs.parse(queryString) : {}
   this.method = options.method
   this.body = options.body || {}
-  this.previous = options.previous
-  this.previousPath = options.previous && options.previous.replace(/\?.*/, '')
+  this.setPrevious(options.previous)
   this.transitional = routes.transitional[this.method]
   this.queue = routes.queue[this.method]
-  this.onRoute = routes.onRoute
+  this.app = routes.app
 }
 
 RenderReq.prototype.cancel = function() {
@@ -15617,9 +14123,6 @@ RenderReq.prototype.cancel = function() {
   if (options.form) {
     options.form.setAttribute('data-router-ignore', '')
     options.form.submit()
-  } else if (options.link) {
-    options.link.setAttribute('data-router-ignore', '')
-    options.link.click()
   } else {
     window.location.assign(options.url)
   }
@@ -15627,7 +14130,11 @@ RenderReq.prototype.cancel = function() {
 
 RenderReq.prototype.setUrl = function(url) {
   this.url = url
-  this.path = this.url.replace(/\?.*/, '')
+  this.path = url.replace(/\?.*/, '')
+}
+RenderReq.prototype.setPrevious = function(previous) {
+  this.previous = previous
+  this.previousPath = previous && previous.replace(/\?.*/, '')
 }
 
 RenderReq.prototype.routeTransitional = function(i, next) {
@@ -15636,8 +14143,7 @@ RenderReq.prototype.routeTransitional = function(i, next) {
   while (item = this.transitional[i++]) {
     if (!item.to.match(this.path) || !item.from.match(this.previousPath)) continue
     var req = this
-    var otherParams = this.routeParams(item.from)
-    var params = this.routeParams(item.to, otherParams)
+    var params = this.routeParams(item.to)
     // Even though we don't need to do anything after a done, pass a
     // no op function, so that routes can expect it to be defined
     function done() {}
@@ -15666,66 +14172,25 @@ RenderReq.prototype.routeQueue = function(i, next) {
   next()
 }
 
-RenderReq.prototype.routeAndTransition = function(i, next) {
-  i || (i = 0)
-  var render = this.page.render
-  var item
-  while (item = this.transitional[i++]) {
-    if (!item.to.match(this.path)) continue
-    var url = this.url
-    var params = this.routeParams(item.to)
-    this.setUrl(mapRoute(item.from.path, params))
-    var req = this
-    var skipped = false
-    function continueNext() {
-      skipped = true
-      req.setUrl(url)
-      req.page.render = render
-      req.routeAndTransition(i, next)
-    }
-    this.page.render = function() {
-      var renderArguments = arguments
-      function done() {
-        if (skipped) return
-        req.page.render = render
-        render.apply(req.page, renderArguments)
-      }
-      req.setUrl(url)
-      var isAsync = req.onMatch(item.to, params, continueNext, done)
-      if (isAsync) return
-      done()
-    }
-    this.routeQueue(0, continueNext)
-    return
-  }
-  next()
-}
-
 RenderReq.prototype.onMatch = function(route, params, next, done) {
+  if (!this.page) return next()
   // Stop the default browser action, such as clicking a link or submitting a form
   if (this.e) {
     this.e.preventDefault()
     this.e = null
   }
   this.page.params = params
-  return this.onRoute(
-    route.callbacks
-  , this.page
-  , this.page.params
-  , next
-  , route.isTransitional
-  , done
-  )
+  if (route.isTransitional) {
+    this.app.onRoute(route.callbacks, this.page, next, done)
+  } else {
+    this.app.onRoute(route.callbacks, this.page, next)
+  }
 }
 
-RenderReq.prototype.routeParams = function(route, otherParams) {
+RenderReq.prototype.routeParams = function(route) {
   var routeParams = route.params
   var params = routeParams.slice()
-  if (otherParams) {
-    for (var key in otherParams) {
-      params[key] = otherParams[key]
-    }
-  }
+
   for (var key in routeParams) {
     params[key] = routeParams[key]
   }
@@ -15737,7 +14202,7 @@ RenderReq.prototype.routeParams = function(route, otherParams) {
   return params
 }
 
-},{"qs":64,"url":18}],64:[function(require,module,exports){
+},{"qs":54,"url":8}],54:[function(require,module,exports){
 /**
  * Object#toString() ref for stringify().
  */
@@ -16105,7 +14570,7 @@ function decode(str) {
   }
 }
 
-},{}],65:[function(require,module,exports){
+},{}],55:[function(require,module,exports){
 
 /**
  * Module dependencies.
@@ -16179,7 +14644,7 @@ Route.prototype.match = function(path){
   return true;
 };
 
-},{"../utils":66}],66:[function(require,module,exports){
+},{"../utils":56}],56:[function(require,module,exports){
 
 /**
  * Module dependencies.
@@ -16491,4 +14956,25 @@ exports.pathRegexp = function(path, keys, sensitive, strict) {
   return new RegExp('^' + path + '$', sensitive ? '' : 'i');
 }
 
-},{}]},{},[1])
+},{}],57:[function(require,module,exports){
+(function (global){
+var DerbyStandalone = require('derby/lib/DerbyStandalone');
+global.derby = module.exports = new DerbyStandalone();
+
+module.exports.App.prototype.registerViews = function(selector) {
+  selector || (selector = 'script[type="text/template"]');
+  var templates = document.querySelectorAll(selector);
+  for (var i = 0; i < templates.length; i++) {
+    var template = templates[i];
+    this.views.register(template.id, template.innerHTML, template.dataset);
+  }
+};
+
+// Include template and expression parsing
+require('derby/node_modules/derby-parsing');
+
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"derby/lib/DerbyStandalone":11,"derby/node_modules/derby-parsing":20}]},{},[57])
+
+
+//# sourceMappingURL=derby-standalone.map.json
