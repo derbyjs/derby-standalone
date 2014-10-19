@@ -9,6 +9,7 @@ var root = path.join(__dirname, 'dist', version);
 mkdirp.sync(root);
 
 browserify({debug: true})
+  .require('derby-templates')
   .add(__dirname)
   .plugin('minifyify', {map: 'derby-standalone.min.map.json'})
   .bundle(function(err, src, map) {
@@ -17,6 +18,7 @@ browserify({debug: true})
   });
 
 browserify({debug: true})
+  .require('derby-templates')
   .add(__dirname)
   .bundle()
   .pipe(exorcist(path.join(root, 'derby-standalone.map.json')))
