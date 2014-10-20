@@ -29,7 +29,7 @@
 <script src="views.js"></script>
 <script>
 var app = derby.createApp();
-require('views')(app.views);
+app.registerViews(require('views'));
 
 app.component('tabs', Tabs);
 function Tabs() {}
