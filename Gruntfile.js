@@ -1,13 +1,10 @@
 module.exports = function (grunt) {
 
-  // load all npm grunt tasks
-  require('load-grunt-tasks')(grunt);
-
   grunt.initConfig({
     derby_views: {
       default: {
         options:{
-          cwd: 'example'
+          cwd: 'example-slim'
         },
         files: {
           'views.js': ['views/templates.html']
@@ -16,7 +13,7 @@ module.exports = function (grunt) {
     },
     watch: {
       css: {
-        files: 'example/views/templates.html',
+        files: 'example-slim/views/templates.html',
         tasks: ['derby_views'],
         options: {
           livereload: true

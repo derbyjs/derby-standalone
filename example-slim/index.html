@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<meta charset="utf8">
+<style>
+  .tabs {
+    list-style: none;
+    padding: 0;
+  }
+  .tabs > li {
+    display: inline-block;
+    padding: 10px;
+    border: 0 solid black;
+    border-width: 0 0 1px;
+    cursor: default;
+  }
+  .tabs > li.active {
+    border-width: 1px 1px 0;
+    margin: 0 -1px;
+  }
+  .tabs-pane {
+    display: none;
+  }
+  .tabs-pane.active {
+    display: block;
+  }
+</style>
+<body>
+
+<script src="../dist/0.6.0-alpha25/derby-standalone.slim.min.js"></script>
+<script src="views.js"></script>
+<script>
+var app = derby.createApp();
+require('views')(app.views);
+
+app.component('tabs', Tabs);
+function Tabs() {}
+Tabs.prototype.init = function(model) {
+  model.setNull('selectedIndex', 0);
+};
+Tabs.prototype.select = function(i) {
+  this.model.set('selectedIndex', i);
+};
+
+var page = app.createPage();
+page.model.set('_page.punchline', 'go');
+
+document.body.appendChild(page.getFragment('body'));
+</script>
