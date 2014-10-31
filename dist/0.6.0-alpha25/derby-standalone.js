@@ -10892,52 +10892,57 @@ Model.INITS.push(function(model) {
     for (var path in map) {
       var filter = map[path];
       if (pass.$filter === filter) continue;
-      if (util.mayImpact(filter.inputSegments, segments)) {
+      if (
+        util.mayImpact(filter.segments, segments) ||
+        (filter.inputsSegments && util.mayImpactAny(filter.inputsSegments, segments))
+      ) {
         filter.update(pass);
       }
     }
   }
 });
 
-Model.prototype.filter = function() {
-  var input, options, fn;
-  if (arguments.length === 1) {
-    fn = arguments[0];
-  } else if (arguments.length === 2) {
-    if (this.isPath(arguments[0])) {
-      input = arguments[0];
-    } else {
-      options = arguments[0];
-    }
-    fn = arguments[1];
-  } else {
-    input = arguments[0];
-    options = arguments[1];
-    fn = arguments[2];
+function parseFilterArguments(model, args) {
+  var fn = args.pop();
+  var options;
+  if (!model.isPath(args[args.length - 1])) {
+    options = args.pop();
   }
-  var inputPath = this.path(input);
-  return this.root._filters.add(inputPath, fn, null, options);
+  var path = model.path(args.shift());
+  var i = args.length;
+  while (i--) {
+    args[i] = model.path(args[i]);
+  }
+  return {
+    path: path,
+    inputPaths: (args.length) ? args : null,
+    options: options,
+    fn: fn
+  };
+}
+
+Model.prototype.filter = function() {
+  var args = Array.prototype.slice.call(arguments);
+  var parsed = parseFilterArguments(this, args);
+  return this.root._filters.add(
+    parsed.path,
+    parsed.fn,
+    null,
+    parsed.inputPaths,
+    parsed.options
+  );
 };
 
 Model.prototype.sort = function() {
-  var input, options, fn;
-  if (arguments.length === 1) {
-    fn = arguments[0];
-  } else if (arguments.length === 2) {
-    if (this.isPath(arguments[0])) {
-      input = arguments[0];
-    } else {
-      options = arguments[0];
-    }
-    fn = arguments[1];
-  } else {
-    input = arguments[0];
-    options = arguments[1];
-    fn = arguments[2];
-  }
-  if (!fn) throw new TypeError('Sort function is required');
-  var inputPath = this.path(input);
-  return this.root._filters.add(inputPath, null, fn, options);
+  var args = Array.prototype.slice.call(arguments);
+  var parsed = parseFilterArguments(this, args);
+  return this.root._filters.add(
+    parsed.path,
+    null,
+    parsed.fn || 'asc',
+    parsed.inputPaths,
+    parsed.options
+  );
 };
 
 Model.prototype.removeAllFilters = function(subpath) {
@@ -10959,8 +10964,8 @@ function Filters(model) {
   this.fromMap = new FromMap();
 }
 
-Filters.prototype.add = function(inputPath, filterFn, sortFn, options) {
-  return new Filter(this, inputPath, filterFn, sortFn, options);
+Filters.prototype.add = function(path, filterFn, sortFn, inputPaths, options) {
+  return new Filter(this, path, filterFn, sortFn, inputPaths, options);
 };
 
 Filters.prototype.toJSON = function() {
@@ -10969,23 +10974,32 @@ Filters.prototype.toJSON = function() {
     var filter = this.fromMap[from];
     // Don't try to bundle if functions were passed directly instead of by name
     if (!filter.bundle) continue;
-    var args = [from, filter.inputPath, filter.filterName, filter.sortName];
+    var args = [from, filter.path, filter.filterName, filter.sortName, filter.inputPaths];
     if (filter.options) args.push(filter.options);
     out.push(args);
   }
   return out;
 };
 
-function Filter(filters, inputPath, filterFn, sortFn, options) {
+function Filter(filters, path, filterFn, sortFn, inputPaths, options) {
   this.filters = filters;
   this.model = filters.model.pass({$filter: this});
-  this.inputPath = inputPath;
-  this.inputSegments = inputPath.split('.');
+  this.path = path;
+  this.segments = path.split('.');
   this.filterName = null;
   this.sortName = null;
   this.bundle = true;
   this.filterFn = null;
   this.sortFn = null;
+  this.inputPaths = inputPaths;
+  this.inputsSegments = null;
+  if (inputPaths) {
+    this.inputsSegments = [];
+    for (var i = 0; i < this.inputPaths.length; i++) {
+      var segments = this.inputPaths[i].split('.');
+      this.inputsSegments.push(segments);
+    }
+  }
   this.options = options;
   this.skip = options && options.skip;
   this.limit = options && options.limit;
@@ -11036,32 +11050,39 @@ Filter.prototype._slice = function(results) {
   return results.slice(begin, end);
 };
 
+Filter.prototype.getInputs = function() {
+  if (!this.inputsSegments) return;
+  var inputs = [];
+  for (var i = 0, len = this.inputsSegments.length; i < len; i++) {
+    var input = this.model._get(this.inputsSegments[i]);
+    inputs.push(input);
+  }
+  return inputs;
+};
+
+Filter.prototype.callFilter = function(items, key, inputs) {
+  var item = items[key];
+  return (inputs) ?
+    this.filterFn.apply(this.model, [item, key, items].concat(inputs)) :
+    this.filterFn.call(this.model, item, key, items);
+};
+
 Filter.prototype.ids = function() {
-  var items = this.model._get(this.inputSegments);
+  var items = this.model._get(this.segments);
   var ids = [];
   if (!items) return ids;
   if (Array.isArray(items)) {
-    if (this.filterFn) {
-      for (var i = 0; i < items.length; i++) {
-        if (this.filterFn.call(this.model, items[i], i, items)) {
-          ids.push(i);
-        }
+    throw new Error('model.filter is not currently supported on arrays');
+  }
+  if (this.filterFn) {
+    var inputs = this.getInputs();
+    for (var key in items) {
+      if (items.hasOwnProperty(key) && this.callFilter(items, key, inputs)) {
+        ids.push(key);
       }
-    } else {
-      for (var i = 0; i < items.length; i++) ids.push(i);
     }
   } else {
-    if (this.filterFn) {
-      for (var key in items) {
-        if (items.hasOwnProperty(key) &&
-          this.filterFn.call(this.model, items[key], key, items)
-        ) {
-          ids.push(key);
-        }
-      }
-    } else {
-      ids = Object.keys(items);
-    }
+    ids = Object.keys(items);
   }
   var sortFn = this.sortFn;
   if (sortFn) {
@@ -11073,32 +11094,22 @@ Filter.prototype.ids = function() {
 };
 
 Filter.prototype.get = function() {
-  var items = this.model._get(this.inputSegments);
+  var items = this.model._get(this.segments);
   var results = [];
   if (Array.isArray(items)) {
-    if (this.filterFn) {
-      for (var i = 0; i < items.length; i++) {
-        if (this.filterFn.call(this.model, items[i], i, items)) {
-          results.push(items[i]);
-        }
+    throw new Error('model.filter is not currently supported on arrays');
+  }
+  if (this.filterFn) {
+    var inputs = this.getInputs();
+    for (var key in items) {
+      if (items.hasOwnProperty(key) && this.callFilter(items, key, inputs)) {
+        results.push(items[key]);
       }
-    } else {
-      results = items.slice();
     }
   } else {
-    if (this.filterFn) {
-      for (var key in items) {
-        if (items.hasOwnProperty(key) &&
-          this.filterFn.call(this.model, items[key], key, items)
-        ) {
-          results.push(items[key]);
-        }
-      }
-    } else {
-      for (var key in items) {
-        if (items.hasOwnProperty(key)) {
-          results.push(items[key]);
-        }
+    for (var key in items) {
+      if (items.hasOwnProperty(key)) {
+        results.push(items[key]);
       }
     }
   }
@@ -11118,7 +11129,7 @@ Filter.prototype.ref = function(from) {
   this.filters.fromMap[from] = this;
   this.idsSegments = ['$filters', from.replace(/\./g, '|')];
   this.update();
-  return this.model.refList(from, this.inputPath, this.idsSegments.join('.'));
+  return this.model.refList(from, this.path, this.idsSegments.join('.'));
 };
 
 Filter.prototype.destroy = function() {
@@ -11171,13 +11182,11 @@ function parseStartArguments(model, args, hasPath) {
   if (hasPath) {
     path = model.path(args.shift());
   }
-  var i = args.length - 1;
   var options;
-  if (model.isPath(args[i])) {
-    args[i] = model.path(args[i]);
-  } else {
+  if (!model.isPath(args[args.length - 1])) {
     options = args.pop();
   }
+  var i = args.length;
   while (i--) {
     args[i] = model.path(args[i]);
   }
