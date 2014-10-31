@@ -4193,10 +4193,12 @@ function parseBlockExpression(expression) {
 }
 
 function parseViewElement(element) {
-  var nameAttribute = element.attributes.name;
+  // TODO: "name" is deprecated in lieu of "is". Remove "name" in Derby 0.6.0
+  var nameAttribute = element.attributes.is || element.attributes.name;
   if (!nameAttribute) {
-    throw new Error('The <view> element requires a name attribute');
+    throw new Error('The <view> element requires an "is" attribute');
   }
+  delete element.attributes.is;
   delete element.attributes.name;
 
   if (nameAttribute.expression) {
@@ -4321,11 +4323,13 @@ function parseContentAttributes(content, view, viewAttributes) {
 }
 
 function parseNameAttribute(element) {
-  var nameAttribute = element.attributes.name;
+  // TODO: "name" is deprecated in lieu of "is". Remove "name" in Derby 0.6.0
+  var nameAttribute = element.attributes.is || element.attributes.name;
   var name = nameAttribute.data;
   if (!name) {
-    throw new Error('The <' + element.tagName + '> element requires a literal name attribute');
+    throw new Error('The <' + element.tagName + '> element requires a literal "is" attribute');
   }
+  delete element.attributes.is;
   delete element.attributes.name;
   return name;
 }
