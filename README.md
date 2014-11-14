@@ -1,7 +1,7 @@
 derby-standalone
 ================
 
-Client-side only version of Derby
+Client-side only version of DerbyJS. Create components and data-driven HTML templates, reuse DerbyJS components inside your codebase.
 
 
 # Usage
@@ -19,7 +19,9 @@ bower install derby-standalone
 
 # Examples
 
-[Data Visualization](http://enjalot.github.io/pinyin/)
+[Data Visualization](http://enjalot.github.io/pinyin/)  
+A Simple Tabs [example](http://derbyjs.github.io/derby-standalone/example/) also available [on CodePen](http://codepen.io/enjalot/pen/JpxGn).  
+You can easily use derby-standalone [inside your own projects](http://bl.ocks.org/enjalot/630d636f1ae0db4e517c).
 
 
 # Building

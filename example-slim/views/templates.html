@@ -1,0 +1,21 @@
+<body:>
+  <h1>Test live-reload</h1>
+  <tabs selectedIndex="{{2}}">
+    <pane title="One"><b>Hi</b></pane>
+    <pane title="Two">ho</pane>
+    <pane title="Three">away</pane>
+    <pane title="Four">we {{_page.punchline}}</pane>
+  </tabs>
+
+
+<tabs: element="tabs" arrays="pane">
+  <ul class="tabs">
+    {{each @pane as #pane, #i}}
+    <li class="{{if #i === selectedIndex}}active{{/}}" on-click="select(#i)">
+      {{#pane.title}}
+    </li>
+    {{/each}}
+  </ul>
+  {{each @pane as #pane, #i}}
+  <div class="tabs-pane {{if #i === selectedIndex}}active{{/}}">{{#pane.content}}</div>
+  {{/each}}

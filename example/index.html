@@ -37,32 +37,32 @@
 <script type="text/template" id="tabs" data-element="tabs" data-arrays="pane">
   <ul class="tabs">
     {{each @pane as #pane, #i}}
-      <li class="{{if #i === selectedIndex}}active{{/}}" on-click="select(#i)">
-        {{#pane.title}}
-      </li>
+    <li class="{{if #i === selectedIndex}}active{{/}}" on-click="select(#i)">
+      {{#pane.title}}
+    </li>
     {{/each}}
   </ul>
   {{each @pane as #pane, #i}}
-    <div class="tabs-pane {{if #i === selectedIndex}}active{{/}}">{{#pane.content}}</div>
+  <div class="tabs-pane {{if #i === selectedIndex}}active{{/}}">{{#pane.content}}</div>
   {{/each}}
 </script>
 
 <script src="http://derbyjs.github.io/derby-standalone/dist/0.6.0-alpha25/derby-standalone.min.js"></script>
 <script>
-var app = derby.createApp();
-app.registerViews();
+  var app = derby.createApp();
+  app.registerViews();
 
-app.component('tabs', Tabs);
-function Tabs() {}
-Tabs.prototype.init = function(model) {
-  model.setNull('selectedIndex', 0);
-};
-Tabs.prototype.select = function(i) {
-  this.model.set('selectedIndex', i);
-};
+  app.component('tabs', Tabs);
+  function Tabs() {}
+  Tabs.prototype.init = function(model) {
+    model.setNull('selectedIndex', 0);
+  };
+  Tabs.prototype.select = function(i) {
+    this.model.set('selectedIndex', i);
+  };
 
-var page = app.createPage();
-page.model.set('_page.punchline', 'go');
+  var page = app.createPage();
+  page.model.set('_page.punchline', 'go');
 
-document.body.appendChild(page.getFragment('body'));
+  document.body.appendChild(page.getFragment('body'));
 </script>
