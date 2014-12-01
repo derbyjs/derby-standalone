@@ -1,7 +1,7 @@
 derby-standalone
 ================
 
-Client-side only version of Derby
+Client-side only version of [DerbyJS](http://derbyjs.com/)
 
 
 # Usage
