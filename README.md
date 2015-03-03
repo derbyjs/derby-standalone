@@ -1,7 +1,7 @@
 derby-standalone
 ================
 
-Client-side only version of Derby
+Client-side only version of [DerbyJS](http://derbyjs.com/)
 
 
 # Usage
@@ -19,6 +19,7 @@ bower install derby-standalone
 
 # Examples
 
+[Basic Codepen example](http://codepen.io/enjalot/pen/JpxGn)  
 [Data Visualization](http://enjalot.github.io/pinyin/)
 
 
