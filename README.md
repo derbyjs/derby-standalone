@@ -8,7 +8,7 @@ Client-side only version of [DerbyJS](http://derbyjs.com/)
 
 ## Hosted
 ```
-<script src="http://derbyjs.github.io/derby-standalone/dist/0.6.0-alpha25/derby-standalone.min.js"></script>
+<script src="http://derbyjs.github.io/derby-standalone/dist/0.6.0-alpha40/derby-standalone.min.js"></script>
 ```
 
 ## Bower
