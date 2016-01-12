@@ -5,7 +5,7 @@
   "main": "lib/index.js",
   "repository": {
     "type": "git",
-    "url": "git://github.com/codeparty/derby-standalone.git"
+    "url": "git://github.com/derbyjs/derby-standalone.git"
   },
   "keywords": [
     "derby"
@@ -13,10 +13,11 @@
   "author": "Nate Smith",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/codeparty/derby-standalone/issues"
+    "url": "https://github.com/derbyjs/derby-standalone/issues"
   },
   "scripts": {
-    "build": "node build.js"
+    "build": "node build.js",
+    "start": "node server.js"
   },
   "dependencies": {
     "derby": "~0.6",
@@ -27,5 +28,9 @@
     "minifyify": "^4.4.0",
     "exorcist": "^0.1.6",
     "express": "^4.9.5"
+  },
+  "homepage": "https://github.com/derbyjs/derby-standalone#readme",
+  "directories": {
+    "example": "example"
   }
 }
