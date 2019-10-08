@@ -6,7 +6,7 @@ Client-side only version of [DerbyJS](https://derbyjs.com)
 
 # Usage
 
-```
+```js
 <script src="https://cdn.jsdelivr.net/npm/derby@0.10"></script>
 ```
 
