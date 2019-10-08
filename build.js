@@ -8,7 +8,7 @@ var root = path.join(__dirname, 'dist');
 
 // Minify and bundle
 browserify({debug: true})
-  .add(__dirname)
+  .add('./index.js')
   .plugin('common-shakeify')
   .plugin('browser-pack-flat/plugin')
   .bundle()
@@ -18,7 +18,7 @@ browserify({debug: true})
 
 // Bundle unminified
 browserify({debug: true})
-  .add(__dirname)
+  .add('./index.js')
   .bundle()
   .pipe(exorcist(path.join(root, 'derby-standalone.map.json')))
   .pipe(fs.createWriteStream(path.join(root, 'derby-standalone.js')));
