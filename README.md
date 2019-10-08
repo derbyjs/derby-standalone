@@ -8,7 +8,7 @@ Client-side only version of [DerbyJS](http://derbyjs.com/)
 
 ## Hosted
 ```
-<script src="http://derbyjs.github.io/derby-standalone/dist/0.6.0-alpha60/derby-standalone.min.js"></script>
+<script src="http://derbyjs.github.io/derby-standalone/dist/0.10.16/derby-standalone.min.js"></script>
 ```
 
 ## Bower
@@ -19,7 +19,7 @@ bower install derby-standalone
 
 # Examples
 
-[Basic Codepen example](http://codepen.io/enjalot/pen/JpxGn)  
+[Basic Codepen example](http://codepen.io/enjalot/pen/JpxGn)
 [Data Visualization](http://enjalot.github.io/pinyin/)
 
 

@@ -11,4 +11,4 @@ module.exports.App.prototype.registerViews = function(selector) {
 };
 
 // Include template and expression parsing
-require('derby/node_modules/derby-parsing');
+require('derby-parsing');

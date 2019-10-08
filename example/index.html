@@ -34,7 +34,7 @@
   </tabs>
 </script>
 
-<script type="text/template" id="tabs" data-element="tabs" data-arrays="pane">
+<script type="text/template" id="tabs" data-tag="tabs" data-arrays="pane">
   <ul class="tabs">
     {{each @pane as #pane, #i}}
       <li class="{{if #i === selectedIndex}}active{{/}}" on-click="select(#i)">
@@ -47,7 +47,7 @@
   {{/each}}
 </script>
 
-<script src="http://derbyjs.github.io/derby-standalone/dist/0.6.0-alpha25/derby-standalone.min.js"></script>
+<script src="/dist/0.10.16/derby-standalone.min.js"></script>
 <script>
 var app = derby.createApp();
 app.registerViews();
