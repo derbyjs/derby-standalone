@@ -1,6 +1,6 @@
 {
   "name": "derby-standalone",
-  "version": "0.10.16",
+  "version": "0.10.17",
   "description": "Client-side only version of Derby",
   "main": "dist/derby-standalone.min.js",
   "repository": {
