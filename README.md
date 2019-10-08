@@ -1,26 +1,19 @@
 derby-standalone
 ================
 
-Client-side only version of [DerbyJS](http://derbyjs.com/)
+Client-side only version of [DerbyJS](https://derbyjs.com)
 
 
 # Usage
 
-## Hosted
 ```
-<script src="http://derbyjs.github.io/derby-standalone/dist/0.10.16/derby-standalone.min.js"></script>
-```
-
-## Bower
-```
-bower install derby-standalone
+<script src="https://cdn.jsdelivr.net/npm/derby@0.10"></script>
 ```
 
 
 # Examples
 
-[Basic Codepen example](http://codepen.io/enjalot/pen/JpxGn)
-[Data Visualization](http://enjalot.github.io/pinyin/)
+[Codepen example](https://codepen.io/nateps/pen/MWWwYZK)
 
 
 # Building

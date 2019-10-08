@@ -1,8 +1,8 @@
 {
   "name": "derby-standalone",
-  "version": "0.1.0",
+  "version": "0.10.16",
   "description": "Client-side only version of Derby",
-  "main": "lib/index.js",
+  "main": "dist/derby-standalone.min.js",
   "repository": {
     "type": "git",
     "url": "git://github.com/derbyjs/derby-standalone.git"
@@ -28,8 +28,7 @@
     "common-shakeify": "^0.6.2",
     "exorcist": "^1.0.1",
     "express": "^4.17.1",
-    "minify-stream": "^1.2.0",
-    "mkdirp": "^0.5.1"
+    "minify-stream": "^1.2.0"
   },
   "homepage": "https://github.com/derbyjs/derby-standalone#readme",
   "directories": {
