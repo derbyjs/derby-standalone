@@ -4037,9 +4037,7 @@ Page.prototype._addContextListeners = function(eventModel) {
   }
   function removeNode(node) {
     var component = node.$component;
-    if (component && !component.singleton) {
-      component.destroy();
-    }
+    if (component) component.destroy();
     var destroyListeners = node.$destroyListeners;
     if (destroyListeners) {
       for (var i = 0; i < destroyListeners.length; i++) {
@@ -4522,7 +4520,9 @@ function setModelAttribute(context, model, key, value) {
 }
 
 function createFactory(constructor) {
-  return (constructor.prototype.singleton) ?
+  // DEPRECATED: constructor.prototype.singleton is deprecated. "singleton"
+  // static property on the constructor is preferred
+  return (constructor.singleton || constructor.prototype.singleton) ?
     new SingletonComponentFactory(constructor) :
     new ComponentFactory(constructor);
 }
@@ -4575,16 +4575,22 @@ ComponentFactory.prototype.create = function(context) {
   }
 };
 
+function noop() {}
+
 function SingletonComponentFactory(constructor) {
   this.constructor = constructor;
   this.component = null;
+  // Disable component from being destroyed, since it is intended to
+  // be used multiple times
+  constructor.prototype.destroy = noop;
 }
+SingletonComponentFactory.prototype.isSingleton = true;
 SingletonComponentFactory.prototype.init = function(context) {
   if (!this.component) this.component = new this.constructor();
   return context.componentChild(this.component);
 };
-// Don't call the create method for singleton components
-SingletonComponentFactory.prototype.create = function() {};
+// Don't call the init or create methods for singleton components
+SingletonComponentFactory.prototype.create = noop;
 
 function isBasePrototype(object) {
   return (object === Object.prototype) ||
@@ -4603,6 +4609,16 @@ var _extendComponent = (Object.setPrototypeOf && Object.getPrototypeOf) ?
   function(constructor) {
     // Find the end of the prototype chain
     var rootPrototype = getRootPrototype(constructor.prototype);
+
+    // This guard is a workaroud to a bug that has occurred in Chakra when
+    // app.component() is invoked twice on the same constructor. In that case,
+    // the `instanceof Component` check in extendComponent incorrectly returns
+    // false after the prototype has already been set to `Component.prototype`.
+    // Then, this code proceeds to set the prototype of Component.prototype
+    // to itself, which throws a "Cyclic __proto__ value" error.
+    // https://github.com/Microsoft/ChakraCore/issues/5915
+    if (rootPrototype === Component.prototype) return;
+
     // Establish inheritance with the pattern that Node's util.inherits() uses
     // if Object.setPrototypeOf() is available (all modern browsers & IE11).
     // This inhertance pattern is not equivalent to class extends, but it does
