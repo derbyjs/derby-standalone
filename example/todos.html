@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Todos example</title>
+<style>
+body {
+  font-family: Sans-Serif;
+  margin: 20px;
+  background: #eee;
+  font-size: 15px;
+}
+input, button {
+  font-size: 15px;
+}
+input[type="checkbox"], button {
+  margin: 0 10px;
+}
+.todos-list {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+}
+.todos-list > li {
+  margin: 10px 0;
+}
+.done {
+  text-decoration: line-through;
+  color: gray;
+}
+.footer {
+  margin: 10px 0;
+}
+</style>
+<body>
+
+<script id="/index.html" type="text/template">
+<Body:>
+  <view
+    is="todos-new"
+    on-submit="list.add()">
+  </view>
+  <view
+    is="todos-list"
+    as="list"
+    items="{{_page.items}}">
+  </view>
+  {{if _page.items.length}}
+    <view
+      is="todos-footer"
+      items="{{_page.items}}">
+    </view>
+  {{/if}}
+
+<todos-new:>
+  <form on-submit="submit()">
+    <input type="text" value="{{value}}">
+    <button type="submit">Add todo</button>
+  </form>
+
+<todos-list:>
+  <ul class="todos-list">
+    {{each items as #item, #i}}
+      <li>
+        <label class="{{if #item.done}}done{{/if}}">
+          <input type="checkbox" checked="{{#item.done}}">
+          {{#item.text}}
+        </label>
+        <button type="button" on-click="remove(#i)">Delete</button>
+      </li>
+    {{/each}}
+  </ul>
+
+<todos-footer:>
+  <div class="footer">
+    {{remaining(@items)}} items left
+  </div>
+</script>
+
+<script src="/dist/derby-standalone.min.js"></script>
+<script>
+var app = derby.createApp();
+// Load templates from id
+app.loadViews('/index.html');
+
+// Register our components by associating their classes with the appropriate templates
+app.component('todos-new', class TodosNew {
+  submit() {
+    const value = this.model.del('value');
+    this.emit('submit', value);
+  }
+});
+
+app.component('todos-list', class TodosList {
+  add(text) {
+    if (!text) return;
+    this.model.push('items', {text});
+  }
+  remove(index) {
+    this.model.remove('items', index);
+  }
+});
+
+app.component('todos-footer', class TodosFooter {
+  static singleton = true;
+  remaining(items) {
+    if (!items) return 0;
+    return items.filter(item => !item.done).length;
+  }
+});
+
+// Append the rendered template to the document. It could be inserted in any DOM location
+var page = app.createPage();
+document.body.appendChild(page.getFragment('Body'));
+</script>

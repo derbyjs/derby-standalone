@@ -1,82 +1,9 @@
 <!DOCTYPE html>
-<meta charset="utf8">
-<style>
-body {
-  font-family: Sans-Serif;
-  margin: 20px;
-}
-.tabs-nav {
-  list-style: none;
-  padding: 0;
-}
-.tabs-nav > li {
-  display: inline-block;
-  padding: 10px;
-  border: 0 solid black;
-  border-width: 0 0 1px;
-  cursor: default;
-}
-.tabs-nav > li.active {
-  border-width: 1px 1px 0;
-  margin: 0 -1px;
-}
-.tabs-pane {
-  display: none;
-}
-.tabs-pane.active {
-  display: block;
-}
-</style>
-<body>
+<meta charset="utf-8">
+<title>Derby standalone examples</title>
 
-<script id="/index.html" type="text/template">
-<Body:>
-  <view is="tabs">
-    <pane title="One">
-      <p>Some stuff here</p>
-    </pane>
-    <pane title="Two">
-      <p>More stuff</p>
-    </pane>
-  </view>
-</script>
-
-<script id="/tabs.html" type="text/template">
-<index: arrays="pane">
-  <ul class="tabs-nav">
-    {{each @pane as #pane, #i}}
-      {{with #i === selectedIndex as #isActive}}
-        <li class="{{if #isActive}}active{{/if}}">
-          {{if #isActive}}
-            <b>{{#pane.title}}</b>
-          {{else}}
-            <a on-click="select(#i)">{{#pane.title}}</a>
-          {{/if}}
-        </li>
-      {{/with}}
-    {{/each}}
-  </ul>
-  {{each @pane as #pane, #i}}
-    <div class="tabs-pane {{if #i === selectedIndex}}active{{/if}}">{{#pane.content}}</div>
-  {{/each}}
-</script>
-
-<script src="/dist/derby-standalone.min.js"></script>
-<script>
-var app = derby.createApp();
-app.loadViews('/index.html');
-
-function Tabs() {}
-Tabs.view = '/tabs.html';
-app.component(Tabs);
-
-Tabs.DataConstructor = function() {
-  this.selectedIndex = 0;
-};
-Tabs.prototype.select = function(index) {
-  this.model.set('selectedIndex', index);
-};
-
-var page = app.createPage();
-document.body.appendChild(page.getFragment('Body'));
-</script>
+<h1>Derby standalone examples</h1>
+<ul>
+  <li><a href="/tabs.html">Tabs</a></li>
+  <li><a href="/todos.html">Todos</a></li>
+</ul>
