@@ -6,11 +6,11 @@ Client-side only version of [DerbyJS](https://derbyjs.com)
 
 # Usage
 
+**[Try it now in CodePen](https://codepen.io/pen?template=LYYZrWN)**
+
 ```html
 <script src="https://cdn.jsdelivr.net/npm/derby-standalone@0.10/dist/derby-standalone.min.js"></script>
 ```
-
-[Try it now in CodePen](https://codepen.io/pen?template=LYYZrWN)
 
 
 # Examples
