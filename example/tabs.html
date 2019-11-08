@@ -68,7 +68,7 @@ var app = derby.createApp();
 app.loadViews('/index.html');
 
 function Tabs() {}
-Tabs.view = '/tabs.html';
+Tabs.view = {file: '/tabs.html'};
 app.component(Tabs);
 
 Tabs.DataConstructor = function() {
