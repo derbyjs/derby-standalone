@@ -3313,6 +3313,7 @@ function App(derby, name, filename, options) {
   this.tracksRoutes = tracks.setup(this);
   this.model = null;
   this.page = null;
+  this._pendingComponentMap = {};
   this._init(options);
 }
 
@@ -3457,39 +3458,110 @@ App.prototype.loadViews = function() {};
 
 App.prototype.loadStyles = function() {};
 
-App.prototype.component = function(viewName, constructor) {
-  if (typeof viewName === 'function') {
-    constructor = viewName;
-    viewName = null;
+// This function is overriden by requiring 'derby/parsing'
+App.prototype.addViews = function() {
+  throw new Error(
+    'Parsing not available. Registering a view from source should not be used ' +
+    'in application code. Instead, specify a filename with view.file.'
+  );
+};
+
+App.prototype.component = function(name, constructor, isDependency) {
+  if (typeof name === 'function') {
+    constructor = name;
+    name = null;
   }
-  // DEPRECATED: constructor.prototype.view and constructor.prototype.name
-  var viewFilename = constructor.view || constructor.prototype.view;
-  var constructorIs = constructor.is || constructor.prototype.name;
+  if (typeof constructor !== 'function') {
+    throw new Error('Missing component constructor argument');
+  }
 
-  // Inherit from Component
-  components.extendComponent(constructor);
+  var viewProp = constructor.view;
+  var viewIs, viewFilename, viewSource, viewDependencies;
+  // Always using an object for the static `view` property is preferred
+  if (viewProp && typeof viewProp === 'object') {
+    viewIs = viewProp.is;
+    viewFilename = viewProp.file;
+    viewSource = viewProp.source;
+    viewDependencies = viewProp.dependencies;
+  } else {
+    // Ignore other properties when `view` is an object. It is possible that
+    // properties could be inherited from a parent component when extending it.
+    //
+    // DEPRECATED: constructor.prototype.name and constructor.prototype.view
+    // use the equivalent static properties instead
+    viewIs = constructor.is || constructor.prototype.name;
+    viewFilename = constructor.view || constructor.prototype.view;
+  }
+  var viewName = name || viewIs ||
+    (viewFilename && path.basename(viewFilename, '.html'));
 
-  if (viewFilename) {
-    viewName = viewName || constructorIs || path.basename(viewFilename, '.html');
-    this.loadViews(viewFilename, viewName);
+  if (!viewName) {
+    throw new Error('No view specified for component');
+  }
+  if (viewFilename && viewSource) {
+    throw new Error('Component may not specify both a view file and source');
+  }
 
-  } else if (!viewName) {
-    if (constructorIs) {
-      viewName = constructorIs;
-      var view = this.views.register(viewName);
-      view.template = templates.emptyTemplate;
-    } else {
-      throw new Error('No view name specified for component');
+  // TODO: DRY. This is copy-pasted from derby-templates
+  var mapName = viewName.replace(/:index$/, '');
+  var currentView = this.views.nameMap[mapName];
+  var currentConstructor = (currentView && currentView.componentFactory) ?
+    currentView.componentFactory.constructor :
+    this._pendingComponentMap[mapName];
+
+  // Avoid registering the same component twice; we want to avoid the overhead
+  // of loading view files from disk again. This is also what prevents
+  // circular dependencies from infinite looping
+  if (currentConstructor === constructor) return;
+
+  // Calling app.component() overrides existing views or components. Prevent
+  // dependencies from doing this without warning
+  if (isDependency && currentView) {
+    throw new Error('Dependencies cannot override existing views. Already registered "' + viewName + '"');
+  }
+
+  // This map is used to prevent infinite loops from circular dependencies
+  this._pendingComponentMap[mapName] = constructor;
+
+  // Recursively register component dependencies
+  if (viewDependencies) {
+    for (var i = 0; i < viewDependencies.length; i++) {
+      var dependency = viewDependencies[i];
+      if (Array.isArray(dependency)) {
+        this.component(dependency[0], dependency[1], true);
+      } else {
+        this.component(null, dependency, true);
+      }
     }
   }
 
-  // Associate the appropriate view with the component type
-  var view = this.views.find(viewName);
+  // Register or find views specified by the component
+  var view;
+  if (viewFilename) {
+    this.loadViews(viewFilename, viewName);
+    view = this.views.find(viewName);
+
+  } else if (viewSource) {
+    this.addViews(viewSource, viewName);
+    view = this.views.find(viewName);
+
+  } else if (name) {
+    view = this.views.find(viewName);
+
+  } else {
+    view = this.views.register(viewName, '');
+  }
   if (!view) {
     var message = this.views.findErrorMessage(viewName);
     throw new Error(message);
   }
+
+  // Inherit from Component
+  components.extendComponent(constructor);
+  // Associate the appropriate view with the component constructor
   view.componentFactory = components.createFactory(constructor);
+
+  delete this._pendingComponentMap[mapName];
 
   // Make chainable
   return this;
@@ -3901,54 +3973,67 @@ Page.prototype.destroy = function() {
 Page.prototype._addModelListeners = function(eventModel) {
   var model = this.model;
   if (!model) return;
+  // Registering model listeners with the *Immediate events helps to prevent
+  // a bug with binding updates where a model listener causes a change to the
+  // path being listened on, directly or indirectly.
 
-  if (model.get('$derbyFlags.immediateModelListeners')) {
-    // Registering model listeners with the *Immediate events helps to prevent
-    // a bug with binding updates where a model listener causes a change to the
-    // path being listened on, directly or indirectly. This flag will go away
-    // after a month or so of private testing, and if everything looks fine,
-    // we'll switch unconditionally to *Immediate listeners.
-    return this._addModelListenersImmediate(eventModel);
+  // TODO: Remove this when upgrading Racer to the next major version. Feature
+  // detect which type of event listener to register by emitting a test event
+  if (useLegacyListeners(model)) {
+    return this._addModelListenersLegacy(eventModel);
   }
 
-  var context = this.context;
-  var changeListener = model.on('change', '**', function onChange(path, value, previous, pass) {
-    var segments = util.castSegments(path.split('.'));
+  // `util.castSegments(segments)` is needed to cast string segments into
+  // numbers, since EventModel#child does typeof checks against segments. This
+  // could be done once in Racer's Model#emit, instead of in every listener.
+  var changeListener = model.on('changeImmediate', function onChange(segments, event) {
     // The pass parameter is passed in for special handling of updates
     // resulting from stringInsert or stringRemove
-    eventModel.set(segments, previous, pass);
+    segments = util.castSegments(segments.slice());
+    eventModel.set(segments, event.previous, event.pass);
   });
-  var loadListener = model.on('load', '**', function onLoad(path) {
-    var segments = util.castSegments(path.split('.'));
+  var loadListener = model.on('loadImmediate', function onLoad(segments) {
+    segments = util.castSegments(segments.slice());
     eventModel.set(segments);
   });
-  var unloadListener = model.on('unload', '**', function onUnload(path) {
-    var segments = util.castSegments(path.split('.'));
-    eventModel.set(segments);
+  var unloadListener = model.on('unloadImmediate', function onUnload(segments, event) {
+    segments = util.castSegments(segments.slice());
+    eventModel.set(segments, event.previous);
   });
-  var insertListener = model.on('insert', '**', function onInsert(path, index, values) {
-    var segments = util.castSegments(path.split('.'));
-    eventModel.insert(segments, index, values.length);
+  var insertListener = model.on('insertImmediate', function onInsert(segments, event) {
+    segments = util.castSegments(segments.slice());
+    eventModel.insert(segments, event.index, event.values.length);
   });
-  var removeListener = model.on('remove', '**', function onRemove(path, index, values) {
-    var segments = util.castSegments(path.split('.'));
-    eventModel.remove(segments, index, values.length);
+  var removeListener = model.on('removeImmediate', function onRemove(segments, event) {
+    segments = util.castSegments(segments.slice());
+    eventModel.remove(segments, event.index, event.values.length);
   });
-  var moveListener = model.on('move', '**', function onMove(path, from, to, howMany) {
-    var segments = util.castSegments(path.split('.'));
-    eventModel.move(segments, from, to, howMany);
+  var moveListener = model.on('moveImmediate', function onMove(segments, event) {
+    segments = util.castSegments(segments.slice());
+    eventModel.move(segments, event.from, event.to, event.howMany);
   });
 
   this._removeModelListeners = function() {
-    model.removeListener('change', changeListener);
-    model.removeListener('load', loadListener);
-    model.removeListener('unload', unloadListener);
-    model.removeListener('insert', insertListener);
-    model.removeListener('remove', removeListener);
-    model.removeListener('move', moveListener);
+    model.removeListener('changeImmediate', changeListener);
+    model.removeListener('loadImmediate', loadListener);
+    model.removeListener('unloadImmediate', unloadListener);
+    model.removeListener('insertImmediate', insertListener);
+    model.removeListener('removeImmediate', removeListener);
+    model.removeListener('moveImmediate', moveListener);
   };
 };
-Page.prototype._addModelListenersImmediate = function(eventModel) {
+function useLegacyListeners(model) {
+  var useLegacy = true;
+  // model.once is broken in older racer, so manually remove event
+  var listener = model.on('changeImmediate', function(segments, event) {
+    model.removeListener('changeImmediate', listener);
+    // Older Racer emits an array of eventArgs, whereas newer racer emits an event object
+    useLegacy = Array.isArray(event);
+  });
+  model.set('$derby.testEvent', true);
+  return useLegacy;
+}
+Page.prototype._addModelListenersLegacy = function(eventModel) {
   var model = this.model;
   if (!model) return;
 
@@ -5336,6 +5421,12 @@ EventModel.prototype.move = function(segments, from, to, howMany) {
 exports = module.exports = require('derby-parsing');
 var htmlUtil = require('html-util');
 var path = require('path');
+var App = require('../App');
+
+App.prototype.addViews = function(file, namespace) {
+  var views = exports.parseViews(file, namespace);
+  exports.registerParsedViews(this, views);
+};
 
 exports.getImportNamespace = function(namespace, attrs, importFilename) {
   var extension = path.extname(importFilename);
@@ -5407,7 +5498,7 @@ exports.registerParsedViews = function(app, items) {
   }
 };
 
-},{"derby-parsing":4,"html-util":28,"path":30}],23:[function(require,module,exports){
+},{"../App":13,"derby-parsing":4,"html-util":28,"path":30}],23:[function(require,module,exports){
 exports.onStringInsert = onStringInsert;
 exports.onStringRemove = onStringRemove;
 exports.onTextInput = onTextInput;

@@ -1,6 +1,6 @@
 {
   "name": "derby-standalone",
-  "version": "0.10.19",
+  "version": "0.10.21",
   "description": "Client-side only version of Derby",
   "main": "dist/derby-standalone.min.js",
   "repository": {
@@ -20,7 +20,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "derby": "^0.10.18"
+    "derby": "^0.10.21"
   },
   "devDependencies": {
     "browser-pack-flat": "^3.4.2",
