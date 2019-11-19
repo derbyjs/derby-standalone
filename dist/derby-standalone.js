@@ -3293,9 +3293,8 @@ var tracks = require('tracks');
 var util = require('racer/lib/util');
 var derbyTemplates = require('derby-templates');
 var templates = derbyTemplates.templates;
-var documentListeners = require('./documentListeners');
 var components = require('./components');
-var Page = require('./Page');
+var PageBase = require('./Page');
 var serializedViews = require('./_views');
 
 module.exports = App;
@@ -3307,7 +3306,7 @@ function App(derby, name, filename, options) {
   this.filename = filename;
   this.scriptHash = '{{DERBY_SCRIPT_HASH}}';
   this.bundledAt = '{{DERBY_BUNDLED_AT}}';
-  this.Page = createAppPage();
+  this.Page = createAppPage(derby);
   this.proto = this.Page.prototype;
   this.views = new templates.Views();
   this.tracksRoutes = tracks.setup(this);
@@ -3317,8 +3316,9 @@ function App(derby, name, filename, options) {
   this._init(options);
 }
 
-function createAppPage() {
-  // Inherit from Page so that we can add controller functions as prototype
+function createAppPage(derby) {
+  var Page = (derby && derby.Page) || PageBase;
+  // Inherit from Page/PageForServer so that we can add controller functions as prototype
   // methods on this app's pages
   function AppPage() {
     Page.apply(this, arguments);
@@ -3640,9 +3640,7 @@ App.prototype._handleMessage = function(action, message) {
   }
 };
 
-util.serverRequire(module, './App.server');
-
-},{"./Page":17,"./_views":18,"./components":19,"./documentListeners":20,"derby-templates":6,"events":26,"path":30,"racer/lib/util":55,"tracks":59}],14:[function(require,module,exports){
+},{"./Page":17,"./_views":18,"./components":19,"derby-templates":6,"events":26,"path":30,"racer/lib/util":55,"tracks":59}],14:[function(require,module,exports){
 var EventEmitter = require('events').EventEmitter;
 var util = require('racer/lib/util');
 var Dom = require('./Dom');
@@ -3702,8 +3700,8 @@ module.exports = DerbyStandalone;
 
 require('./documentListeners').add(document);
 
-// Standard Derby inherits from Racer, but we just do set up the event emitter
-// and expose the Model and util here instead
+// Standard Derby inherits from Racer, but we only set up the event emitter and
+// expose the Model and util here instead
 function DerbyStandalone() {
   EventEmitter.call(this);
 }
@@ -3711,16 +3709,21 @@ util.mergeInto(DerbyStandalone.prototype, EventEmitter.prototype);
 DerbyStandalone.prototype.Model = Model;
 DerbyStandalone.prototype.util = util;
 
-DerbyStandalone.prototype.App = App;
+DerbyStandalone.prototype.App = AppStandalone;
 DerbyStandalone.prototype.Page = Page;
 DerbyStandalone.prototype.Component = components.Component;
 
 DerbyStandalone.prototype.createApp = function() {
-  return new App(this);
+  return new this.App(this);
 };
 
-// Overriden on server
-App.prototype._init = function() {
+function AppStandalone(derby) {
+  App.call(this, derby);
+}
+AppStandalone.prototype = Object.create(App.prototype);
+AppStandalone.prototype.constructor = AppStandalone;
+
+AppStandalone.prototype._init = function() {
   this.model = new this.derby.Model();
   this.createPage();
 };
@@ -3851,10 +3854,8 @@ var documentListeners = require('./documentListeners');
 
 module.exports = Page;
 
-function Page(app, model, req, res) {
+function Page(app, model) {
   Controller.call(this, app, this, model);
-  this.req = req;
-  this.res = res;
   this.params = null;
   if (this.init) this.init(model);
   this.context = this._createContext();
@@ -4251,8 +4252,6 @@ function textUpdate(binding, element, previous, pass) {
   }
   binding.template.update(binding.context, binding);
 }
-
-util.serverRequire(module, './Page.server');
 
 },{"./Controller":14,"./components":19,"./documentListeners":20,"./eventmodel":21,"./textDiff":23,"derby-templates":6,"racer/lib/util":55}],18:[function(require,module,exports){
 // This file is intentionally empty.
@@ -10133,6 +10132,7 @@ module.exports = {
 var utils = require('./utils');
 
 var has = Object.prototype.hasOwnProperty;
+var isArray = Array.isArray;
 
 var defaults = {
     allowDots: false,
@@ -10213,8 +10213,12 @@ var parseValues = function parseQueryStringValues(str, options) {
             val = interpretNumericEntities(val);
         }
 
-        if (val && options.comma && val.indexOf(',') > -1) {
+        if (val && typeof val === 'string' && options.comma && val.indexOf(',') > -1) {
             val = val.split(',');
+        }
+
+        if (part.indexOf('[]=') > -1) {
+            val = isArray(val) ? [val] : val;
         }
 
         if (has.call(obj, key)) {
@@ -10699,6 +10703,7 @@ var arrayToObject = function arrayToObject(source, options) {
 };
 
 var merge = function merge(target, source, options) {
+    /* eslint no-param-reassign: 0 */
     if (!source) {
         return target;
     }
