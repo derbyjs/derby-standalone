@@ -2745,6 +2745,7 @@ function View(views, name, source, options) {
   this.literal = options && (options.literal || options.literal === '');
   this.template = null;
   this.componentFactory = null;
+  this.fromSerialized = false;
 }
 View.prototype = Object.create(saddle.Template.prototype);
 View.prototype.constructor = View;
@@ -3052,12 +3053,22 @@ Views.prototype.register = function(name, source, options) {
   if (tagName) this.tagMap[tagName] = view;
   return view;
 };
+Views.prototype.deserialize = function(items) {
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var setTemplate = item[0];
+    var name = item[1];
+    var source = item[2];
+    var options = item[3];
+    var view = this.register(name, source, options);
+    view.parse = setTemplate;
+    view.fromSerialized = true;
+  }
+};
 Views.prototype.serialize = function(options) {
-  var out = 'function(derbyTemplates, views) {' +
-    'var expressions = derbyTemplates.expressions;' +
-    'var templates = derbyTemplates.templates;';
   var forServer = options && options.server;
   var minify = options && options.minify;
+  var items = [];
   for (var name in this.nameMap) {
     var view = this.nameMap[name];
     var template = view.template || view.parse();
@@ -3070,13 +3081,24 @@ Views.prototype.serialize = function(options) {
       // browser, but they will output nothing on the browser
       if (view.options.server) template = exports.emptyTemplate;
     }
-    out += 'views.register(' + serializeObject.args([
-      view.name
-    , (minify) ? null : view.source
-    , (hasKeys(view.options)) ? view.options : null
-    ]) + ').parse = function() {return this.template = ' + template.serialize() + '};';
+    // Serializing views as a function allows them to be constructed lazily upon
+    // first use. This can improve initial load times of the application when
+    // there are many views
+    items.push(
+      '[function(){return this.template=' +
+        template.serialize() + '},' +
+        serializeObject.args([
+          view.name,
+          (minify) ? null : view.source,
+          (hasKeys(view.options)) ? view.options : null
+        ]) +
+      ']'
+    );
   }
-  return out + '}';
+  return 'function(derbyTemplates, views){' +
+    'var expressions = derbyTemplates.expressions,' +
+    'templates = derbyTemplates.templates;' +
+    'views.deserialize([' + items.join(',') + '])}';
 };
 Views.prototype.findErrorMessage = function(name, contextView) {
   var names = Object.keys(this.nameMap);
@@ -3516,7 +3538,7 @@ App.prototype.component = function(name, constructor, isDependency) {
 
   // Calling app.component() overrides existing views or components. Prevent
   // dependencies from doing this without warning
-  if (isDependency && currentView) {
+  if (isDependency && currentView && !currentView.fromSerialized) {
     throw new Error('Dependencies cannot override existing views. Already registered "' + viewName + '"');
   }
 
