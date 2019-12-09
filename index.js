@@ -22,7 +22,7 @@ App.prototype.loadViews = function(filename, namespace) {
 };
 
 App.prototype._registerTemplate = function(template, namespace, filename) {
-  var file = template.innerHTML;
+  var file = typeof template === 'string' ? template : template.innerHTML;
   var app = this;
   function onImport(attrs) {
     var dir = path.dirname(filename);
